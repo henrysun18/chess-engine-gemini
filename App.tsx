@@ -74,6 +74,15 @@ function App() {
       }
     };
 
+    workerRef.current.onerror = (err) => {
+       console.error("Worker terminated unexpectedly:", err);
+       setEngineResult(prev => ({
+           ...prev,
+           isThinking: false,
+           logs: [...prev.logs, `[CRITICAL] Worker crashed: ${err.message}`]
+       }));
+    };
+
     return () => {
       workerRef.current?.terminate();
       URL.revokeObjectURL(url);

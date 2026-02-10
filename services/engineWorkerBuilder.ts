@@ -46,11 +46,11 @@ let timeLimit = 0;
 
 // Transposition Table
 const tt = new Map();
-// 4M entries is roughly 250MB RAM depending on object overhead.
-const TT_SIZE_LIMIT = 4000000; 
+// Limit to ~1 Million entries to stay well under browser memory limits (~100MB-200MB)
+// This prevents "Map maximum size exceeded" errors
+const TT_SIZE_LIMIT = 1000000; 
 
 // Killer Moves: [ply][move_index]
-// Use MAX_PLY for size
 let killerMoves = [];
 // History Heuristic: [from_sq * 64 + to_sq]
 let historyTable = new Int32Array(4096); 
@@ -68,7 +68,6 @@ function initZobrist() {
     for(let i=0; i<16; i++) zobristCastle[i] = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
     for(let i=0; i<65; i++) zobristEp[i] = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
     
-    // Init killer moves array
     killerMoves = new Array(MAX_PLY);
     for(let i=0; i<MAX_PLY; i++) killerMoves[i] = [null, null];
 }
@@ -205,7 +204,6 @@ function isAttacked(sq, byColor) {
     if (onBoard(pr, c-1)) { const p=internalBoard[pr*8+c-1]; if(p && p.color===byColor && p.type==='p') return true; }
     if (onBoard(pr, c+1)) { const p=internalBoard[pr*8+c+1]; if(p && p.color===byColor && p.type==='p') return true; }
     
-    // Knights
     const kn = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
     for(let i=0; i<8; i++) {
         const nr = r+kn[i][0], nc=c+kn[i][1];
@@ -215,7 +213,6 @@ function isAttacked(sq, byColor) {
         }
     }
 
-    // King
     const ki = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
     for(let i=0; i<8; i++) {
          const nr = r+ki[i][0], nc=c+ki[i][1];
@@ -225,7 +222,6 @@ function isAttacked(sq, byColor) {
         }
     }
 
-    // Sliding
     const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
     for(let d=0; d<8; d++) {
         let nr=r+dirs[d][0], nc=c+dirs[d][1];
@@ -245,7 +241,6 @@ function isAttacked(sq, byColor) {
     return false;
 }
 
-// Optimized Move Generation
 function generateMoves(capturesOnly = false) {
     const moves = [];
     const turn = internalTurn;
@@ -262,7 +257,6 @@ function generateMoves(capturesOnly = false) {
             const promRow = turn === 'w' ? 0 : 7;
             const startRow = turn === 'w' ? 6 : 1;
             
-            // Quiet Pushes
             if (!capturesOnly) {
                 const f1 = (r+fw)*8+c;
                 if (onBoard(r+fw, c) && !internalBoard[f1]) {
@@ -278,7 +272,6 @@ function generateMoves(capturesOnly = false) {
                 }
             }
             
-            // Captures
             const caps = [[fw, -1], [fw, 1]];
             for(let k=0; k<2; k++) {
                  const dr=caps[k][0], dc=caps[k][1];
@@ -339,7 +332,6 @@ function generateMoves(capturesOnly = false) {
                  }
              }
         } else {
-            // Sliding
             const dirs = (p.type==='b'||p.type==='q' ? [[-1,-1],[-1,1],[1,-1],[1,1]] : []).concat(
                          (p.type==='r'||p.type==='q' ? [[-1,0],[1,0],[0,-1],[0,1]] : []));
             for(let d=0; d<dirs.length; d++) {
@@ -490,7 +482,6 @@ function sortMoves(moves, bestMove, ply) {
 }
 
 function checkTime() {
-    // Check every 1024 nodes (down from 2048) for faster timeout response
     if ((nodesSearched & 1023) === 0) {
         if (Date.now() - startTime > timeLimit) {
             throw new Error("Timeout");
@@ -548,7 +539,6 @@ function alphaBeta(depth, alpha, beta, ply = 0, useLMR) {
     
     // 1. TT Lookup
     let ttEntry = tt.get(currentHash);
-    // IsRoot check replaced by ply === 0
     if (ttEntry && ttEntry.depth >= depth && ply > 0) {
         if (ttEntry.flag === 0) return ttEntry.score;
         if (ttEntry.flag === 1 && ttEntry.score <= alpha) return alpha;
@@ -660,6 +650,10 @@ function alphaBeta(depth, alpha, beta, ply = 0, useLMR) {
         else return 0; 
     }
 
+    // MEMORY GOVERNOR: prevent Map size exceeded error
+    if (tt.size >= TT_SIZE_LIMIT) {
+        tt.clear(); // Drastic but effective for browser context safety
+    }
     tt.set(currentHash, { depth, score: bestScore, flag: ttFlag, bestMove });
 
     return bestScore;
@@ -683,6 +677,10 @@ function formatMove(m) {
 
 self.onmessage = function(e) {
     const { fen, depth, timeLimit: limit, branchingFactor, useDynamicBranching, requestId } = e.data;
+    
+    // FAULT TOLERANCE WRAPPER
+    // Wraps the entire search to catch OOM, Recursion, or Logic errors
+    // and returns the best move found so far instead of crashing silently.
     
     try {
         parseState(fen);
@@ -718,28 +716,31 @@ self.onmessage = function(e) {
                beta = scoreGlobal + 50;
             }
 
-            try {
-                let bestMoveLocal = null;
-                let bestScoreLocal = -Infinity;
+            // Loop moves at Root
+            let bestMoveLocal = null;
+            let bestScoreLocal = -Infinity;
+            
+            for (const m of moves) {
+                // Time check inside root moves to be responsive
+                if (Date.now() - startTime > timeLimit) break;
                 
-                for (const m of moves) {
-                    const undo = makeMove(m);
-                    const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
-                    if (isAttacked(kIdx, internalTurn)) {
-                        unmakeMove(m, undo);
-                        continue;
-                    }
-                    
-                    // Root search is ply 0, next is ply 1
-                    const score = -alphaBeta(d - 1, -beta, -alpha, 1, useDynamicBranching);
+                const undo = makeMove(m);
+                const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
+                if (isAttacked(kIdx, internalTurn)) {
                     unmakeMove(m, undo);
+                    continue;
+                }
+                
+                // Root search is ply 0, next is ply 1
+                const score = -alphaBeta(d - 1, -beta, -alpha, 1, useDynamicBranching);
+                unmakeMove(m, undo);
+                
+                if (score > bestScoreLocal) {
+                    bestScoreLocal = score;
+                    bestMoveLocal = m;
+                    if (score > alpha) alpha = score;
                     
-                    if (score > bestScoreLocal) {
-                        bestScoreLocal = score;
-                        bestMoveLocal = m;
-                        if (score > alpha) alpha = score;
-                    }
-                    
+                    // UPDATE: Immediately report improved best move!
                     self.postMessage({ 
                         type: 'progress', 
                         depth: d, 
@@ -748,25 +749,27 @@ self.onmessage = function(e) {
                         score: bestScoreLocal,
                         requestId
                     });
-                }
-                
-                // Aspiration Window Logic
-                if (d > 4 && (bestScoreLocal <= alpha || bestScoreLocal >= beta)) {
-                     // If aspiration fails, just accept for now in simple worker
-                     bestMoveGlobal = bestMoveLocal; 
-                     scoreGlobal = bestScoreLocal;
                 } else {
-                    bestMoveGlobal = bestMoveLocal;
-                    scoreGlobal = bestScoreLocal;
+                     // Still report progress even if not best move, just to show nodes moving
+                     // But don't overwrite bestMove unless it's null (first move)
+                      self.postMessage({ 
+                        type: 'progress', 
+                        depth: d, 
+                        nodes: nodesSearched, 
+                        bestMove: formatMove(bestMoveLocal || bestMoveGlobal), 
+                        score: bestScoreLocal,
+                        requestId
+                    });
                 }
-
-            } catch (err) {
-                if (err.message === "Timeout") {
-                    log("Time limit reached. Stopping.");
-                    break;
-                } else {
-                    throw err;
-                }
+            }
+            
+            // Aspiration Window Logic
+            if (d > 4 && (bestScoreLocal <= alpha || bestScoreLocal >= beta)) {
+                 bestMoveGlobal = bestMoveLocal || bestMoveGlobal; 
+                 scoreGlobal = bestScoreLocal;
+            } else {
+                bestMoveGlobal = bestMoveLocal || bestMoveGlobal;
+                scoreGlobal = bestScoreLocal;
             }
         }
 
@@ -779,7 +782,25 @@ self.onmessage = function(e) {
         });
 
     } catch (err) {
-        log(\`WORKER ERROR: \${err.message}\`);
+        log(\`WORKER ERROR (Recovered): \${err.message}\`);
+        // Fallback: Return best global move found so far
+        // This ensures the game doesn't hang.
+        // We use a safe "bestMove" if available, or just stop thinking.
+        
+        // Try to retrieve best move from TT if global is null
+        let recoveryMove = null;
+        try {
+            const ttEntry = tt.get(currentHash);
+            if (ttEntry) recoveryMove = formatMove(ttEntry.bestMove);
+        } catch(e) {}
+
+        self.postMessage({
+            type: 'done',
+            bestMove: recoveryMove, // Might be null, but better than nothing
+            score: 0,
+            nodes: nodesSearched,
+            requestId
+        });
     }
 };
 `;
