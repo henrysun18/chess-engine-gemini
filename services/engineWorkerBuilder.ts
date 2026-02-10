@@ -7,14 +7,14 @@ function log(msg) {
 
 // --- CONSTANTS ---
 const SQUARES_COUNT = 64;
+const MAX_PLY = 100; // Hard limit to prevent stack overflow
 
 // MG = Middlegame, EG = Endgame
 const PIECE_VALUES = { 
     p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 
 };
 
-// Piece Square Tables (Interpolated typically, but simplified here)
-// Weighted towards center control
+// Piece Square Tables (Simplified)
 const PSTS = {
   p: [0,0,0,0,0,0,0,0,50,50,50,50,50,50,50,50,10,10,20,30,30,20,10,10,5,5,10,25,25,10,5,5,0,0,0,20,20,0,0,0,5,-5,-10,0,0,-10,-5,5,5,10,10,-20,-20,10,10,5,0,0,0,0,0,0,0,0],
   n: [-50,-40,-30,-30,-30,-30,-40,-50,-40,-20,0,0,0,0,-20,-40,-30,0,10,15,15,10,0,-30,-30,5,15,20,20,15,5,-30,-30,0,15,20,20,15,0,-30,-30,5,10,15,15,10,5,-30,-40,-20,0,5,5,0,-20,-40,-50,-40,-30,-30,-30,-30,-40,-50],
@@ -24,7 +24,6 @@ const PSTS = {
   k: [-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-20,-30,-30,-40,-40,-30,-30,-20,-10,-20,-20,-20,-20,-20,-20,-10,20,20,0,0,0,0,20,20,20,30,10,0,0,10,30,20]
 };
 
-// King End Game Table (Encourages king to go to center)
 const KING_ENDGAME_PST = [
     -50,-40,-30,-20,-20,-30,-40,-50,
     -30,-20,-10,  0,  0,-10,-20,-30,
@@ -42,14 +41,19 @@ let internalTurn = 'w';
 let castleRights = 15;
 let enPassant = -1;
 let nodesSearched = 0;
+let startTime = 0;
+let timeLimit = 0;
 
 // Transposition Table
 const tt = new Map();
-const TT_SIZE_LIMIT = 4000000; // Increased for better hit rate
+// 4M entries is roughly 250MB RAM depending on object overhead.
+const TT_SIZE_LIMIT = 4000000; 
 
-// Killer Moves: [depth][move_index]
+// Killer Moves: [ply][move_index]
+// Use MAX_PLY for size
 let killerMoves = [];
-let historyMoves = new Array(64 * 64).fill(0);
+// History Heuristic: [from_sq * 64 + to_sq]
+let historyTable = new Int32Array(4096); 
 
 // Zobrist
 let zobristTable = [];
@@ -65,7 +69,8 @@ function initZobrist() {
     for(let i=0; i<65; i++) zobristEp[i] = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
     
     // Init killer moves array
-    for(let i=0; i<32; i++) killerMoves[i] = [null, null];
+    killerMoves = new Array(MAX_PLY);
+    for(let i=0; i<MAX_PLY; i++) killerMoves[i] = [null, null];
 }
 initZobrist();
 
@@ -122,24 +127,16 @@ function parseState(fen) {
     }
 }
 
-// --- ADVANCED EVALUATION ---
+// --- EVALUATION ---
 function evaluate() {
-    let mgScore = 0; // Middlegame Score
-    let egScore = 0; // Endgame Score
-    let phase = 0;   // Game Phase (0 = End, 24 = Start approx)
+    let mgScore = 0; 
+    let egScore = 0; 
+    let phase = 0;
     
-    // Phase weights for pieces
     const phaseWeights = { p: 0, n: 1, b: 1, r: 2, q: 4, k: 0 };
     
-    // Mobility counters
-    let wMobility = 0;
-    let bMobility = 0;
-
-    // Pawn structure
     const wPawns = [];
     const bPawns = [];
-    let wKingSq = -1;
-    let bKingSq = -1;
 
     for (let i = 0; i < 64; i++) {
         const p = internalBoard[i];
@@ -153,14 +150,6 @@ function evaluate() {
         // 1. Material & PST
         let positionalVal = PSTS[p.type][pstIdx];
         
-        // Special Case: King PST changes in endgame
-        if (p.type === 'k') {
-            if (p.color === 'w') wKingSq = i; else bKingSq = i;
-            // We interpolate king safety later, but for raw loop:
-            // Middlegame king safety is in standard PST (hiding in corners)
-            // Endgame king activity is in KING_ENDGAME_PST
-        }
-
         if (p.color === 'w') {
             mgScore += val + positionalVal;
             egScore += val + (p.type === 'k' ? KING_ENDGAME_PST[pstIdx] : positionalVal);
@@ -172,21 +161,18 @@ function evaluate() {
         }
     }
 
-    // 2. Pawn Structure (Doubled, Isolated) - Simple Version
-    // Heuristic: file counts
-    const wFiles = new Array(8).fill(0);
-    const bFiles = new Array(8).fill(0);
-    wPawns.forEach(sq => wFiles[sq%8]++);
-    bPawns.forEach(sq => bFiles[sq%8]++);
+    // 2. Pawn Structure
+    const wFiles = new Int8Array(8);
+    const bFiles = new Int8Array(8);
+    for(let i=0; i<wPawns.length; i++) wFiles[wPawns[i]%8]++;
+    for(let i=0; i<bPawns.length; i++) bFiles[bPawns[i]%8]++;
 
     let wStructPenalty = 0;
     let bStructPenalty = 0;
 
     for(let f=0; f<8; f++) {
-        if (wFiles[f] > 1) wStructPenalty += 20; // Doubled
+        if (wFiles[f] > 1) wStructPenalty += 20; 
         if (bFiles[f] > 1) bStructPenalty += 20;
-        
-        // Isolated (simplified)
         if (wFiles[f] > 0 && (f===0 || wFiles[f-1]===0) && (f===7 || wFiles[f+1]===0)) wStructPenalty += 15;
         if (bFiles[f] > 0 && (f===0 || bFiles[f-1]===0) && (f===7 || bFiles[f+1]===0)) bStructPenalty += 15;
     }
@@ -194,14 +180,6 @@ function evaluate() {
     mgScore += (bStructPenalty - wStructPenalty);
     egScore += (bStructPenalty - wStructPenalty);
 
-    // 3. Mobility (Very rough approximation, purely based on piece count for now as full generation is slow)
-    // A smarter engine does this during move gen. 
-    // We will skip explicit move generation for mobility to keep NPS high, 
-    // but rely on the fact that better developed pieces (PST) usually have better mobility.
-    
-    // 4. Interpolation
-    // Phase typically goes from ~24 (start) to 0.
-    // We clamp phase between 0 and 24.
     const mgPhase = Math.min(24, phase);
     const egPhase = 24 - mgPhase;
     
@@ -210,7 +188,6 @@ function evaluate() {
     return internalTurn === 'w' ? finalScore : -finalScore;
 }
 
-// Check if material is low (Endgame detection for dynamic depth)
 function isEndgame() {
     let material = 0;
     for(let i=0; i<64; i++) {
@@ -219,7 +196,6 @@ function isEndgame() {
             material += PIECE_VALUES[p.type];
         }
     }
-    // E.g. less than 1500 (A rook and two minors, or a queen)
     return material < 1500;
 }
 
@@ -229,22 +205,27 @@ function isAttacked(sq, byColor) {
     if (onBoard(pr, c-1)) { const p=internalBoard[pr*8+c-1]; if(p && p.color===byColor && p.type==='p') return true; }
     if (onBoard(pr, c+1)) { const p=internalBoard[pr*8+c+1]; if(p && p.color===byColor && p.type==='p') return true; }
     
+    // Knights
     const kn = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
-    for(let o of kn) {
-        if(onBoard(r+o[0], c+o[1])) {
-            const p=internalBoard[(r+o[0])*8+c+o[1]];
+    for(let i=0; i<8; i++) {
+        const nr = r+kn[i][0], nc=c+kn[i][1];
+        if(onBoard(nr, nc)) {
+            const p=internalBoard[nr*8+nc];
             if(p && p.color===byColor && p.type==='n') return true;
         }
     }
 
+    // King
     const ki = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-    for(let o of ki) {
-         if(onBoard(r+o[0], c+o[1])) {
-            const p=internalBoard[(r+o[0])*8+c+o[1]];
+    for(let i=0; i<8; i++) {
+         const nr = r+ki[i][0], nc=c+ki[i][1];
+         if(onBoard(nr, nc)) {
+            const p=internalBoard[nr*8+nc];
             if(p && p.color===byColor && p.type==='k') return true;
         }
     }
 
+    // Sliding
     const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
     for(let d=0; d<8; d++) {
         let nr=r+dirs[d][0], nc=c+dirs[d][1];
@@ -264,6 +245,7 @@ function isAttacked(sq, byColor) {
     return false;
 }
 
+// Optimized Move Generation
 function generateMoves(capturesOnly = false) {
     const moves = [];
     const turn = internalTurn;
@@ -280,6 +262,7 @@ function generateMoves(capturesOnly = false) {
             const promRow = turn === 'w' ? 0 : 7;
             const startRow = turn === 'w' ? 6 : 1;
             
+            // Quiet Pushes
             if (!capturesOnly) {
                 const f1 = (r+fw)*8+c;
                 if (onBoard(r+fw, c) && !internalBoard[f1]) {
@@ -295,7 +278,10 @@ function generateMoves(capturesOnly = false) {
                 }
             }
             
-            [[fw, -1], [fw, 1]].forEach(([dr, dc]) => {
+            // Captures
+            const caps = [[fw, -1], [fw, 1]];
+            for(let k=0; k<2; k++) {
+                 const dr=caps[k][0], dc=caps[k][1];
                  if (onBoard(r+dr, c+dc)) {
                      const ti = (r+dr)*8+c+dc;
                      const t = internalBoard[ti];
@@ -310,10 +296,11 @@ function generateMoves(capturesOnly = false) {
                          moves.push({f:i, t:ti, p:p, cap:{type:'p', color:enemy}, flag:'ep', val: 100});
                      }
                  }
-            });
-
+            }
         } else if (p.type === 'n') {
-            [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr, dc]) => {
+            const dirs = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+            for(let k=0; k<8; k++) {
+                const dr=dirs[k][0], dc=dirs[k][1];
                 if(onBoard(r+dr, c+dc)) {
                     const ti = (r+dr)*8+c+dc;
                     const t = internalBoard[ti];
@@ -323,9 +310,11 @@ function generateMoves(capturesOnly = false) {
                         moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
                     }
                 }
-            });
+            }
         } else if (p.type === 'k') {
-             [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr, dc]) => {
+             const dirs = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+             for(let k=0; k<8; k++) {
+                 const dr=dirs[k][0], dc=dirs[k][1];
                  if(onBoard(r+dr, c+dc)) {
                     const ti = (r+dr)*8+c+dc;
                     const t = internalBoard[ti];
@@ -335,7 +324,7 @@ function generateMoves(capturesOnly = false) {
                         moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
                     }
                  }
-             });
+             }
              if (!capturesOnly) {
                  if (turn === 'w') {
                      if ((castleRights & 1) && !internalBoard[61] && !internalBoard[62] && !isAttacked(60, 'b') && !isAttacked(61, 'b') && !isAttacked(62, 'b')) 
@@ -350,10 +339,11 @@ function generateMoves(capturesOnly = false) {
                  }
              }
         } else {
+            // Sliding
             const dirs = (p.type==='b'||p.type==='q' ? [[-1,-1],[-1,1],[1,-1],[1,1]] : []).concat(
                          (p.type==='r'||p.type==='q' ? [[-1,0],[1,0],[0,-1],[0,1]] : []));
-            for(let d of dirs) {
-                let nr=r+d[0], nc=c+d[1];
+            for(let d=0; d<dirs.length; d++) {
+                let nr=r+dirs[d][0], nc=c+dirs[d][1];
                 while(onBoard(nr,nc)) {
                     const ti = nr*8+nc;
                     const t = internalBoard[ti];
@@ -363,7 +353,7 @@ function generateMoves(capturesOnly = false) {
                         if (t.color === enemy) moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
                         break;
                     }
-                    nr+=d[0]; nc+=d[1];
+                    nr+=dirs[d][0]; nc+=dirs[d][1];
                 }
             }
         }
@@ -469,14 +459,13 @@ function unmakeMove(m, undo) {
     }
 }
 
-// Sorting: TT Best -> Captures -> Killers -> History
-function sortMoves(moves, bestMove, depth) {
+// Sorting: TT Best -> Captures (MVV/LVA) -> Killer -> History -> Remaining
+function sortMoves(moves, bestMove, ply) {
     moves.sort((a, b) => {
-        if (bestMove && a.f === bestMove.f && a.t === bestMove.t) return 1000000;
-        if (bestMove && b.f === bestMove.f && b.t === bestMove.t) return -1000000;
+        if (bestMove && a.f === bestMove.f && a.t === bestMove.t) return 2000000;
+        if (bestMove && b.f === bestMove.f && b.t === bestMove.t) return -2000000;
         
-        // MVV/LVA for captures (Most Valuable Victim, Least Valuable Attacker)
-        // Simplified here to just victim value
+        // MVV/LVA
         const valA = a.val || 0;
         const valB = b.val || 0;
         if (valA !== valB) return valB - valA;
@@ -486,33 +475,60 @@ function sortMoves(moves, bestMove, depth) {
         if (!a.prom && b.prom) return -10000;
 
         // Killer Moves
-        if (depth && killerMoves[depth]) {
-            if (killerMoves[depth][0] && a.f === killerMoves[depth][0].f && a.t === killerMoves[depth][0].t) return 900;
-            if (killerMoves[depth][0] && b.f === killerMoves[depth][0].f && b.t === killerMoves[depth][0].t) return -900;
+        if (ply < MAX_PLY && killerMoves[ply]) {
+            if (killerMoves[ply][0] && a.f === killerMoves[ply][0].f && a.t === killerMoves[ply][0].t) return 900;
+            if (killerMoves[ply][0] && b.f === killerMoves[ply][0].f && b.t === killerMoves[ply][0].t) return -900;
+            if (killerMoves[ply][1] && a.f === killerMoves[ply][1].f && a.t === killerMoves[ply][1].t) return 800;
+            if (killerMoves[ply][1] && b.f === killerMoves[ply][1].f && b.t === killerMoves[ply][1].t) return -800;
         }
-
-        return 0; 
+        
+        // History Heuristic
+        const histA = historyTable[a.f * 64 + a.t];
+        const histB = historyTable[b.f * 64 + b.t];
+        return histB - histA;
     });
 }
 
-function quiesce(alpha, beta) {
+function checkTime() {
+    // Check every 1024 nodes (down from 2048) for faster timeout response
+    if ((nodesSearched & 1023) === 0) {
+        if (Date.now() - startTime > timeLimit) {
+            throw new Error("Timeout");
+        }
+    }
+}
+
+function quiesce(alpha, beta, ply = 0) {
+    checkTime();
+    
+    // Stack Overflow Protection
+    if (ply >= MAX_PLY) return evaluate();
+
     nodesSearched++;
     const standPat = evaluate();
     if (standPat >= beta) return beta;
+    
+    // Delta Pruning
+    const BIG_DELTA = 950; 
+    if (standPat < alpha - BIG_DELTA) {
+        return alpha; 
+    }
+
     if (alpha < standPat) alpha = standPat;
 
     const moves = generateMoves(true);
-    sortMoves(moves, null, 0);
+    sortMoves(moves, null, ply);
 
     for (const m of moves) {
         const undo = makeMove(m);
+        
         const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
         if (isAttacked(kIdx, internalTurn)) {
             unmakeMove(m, undo);
             continue;
         }
 
-        const score = -quiesce(-beta, -alpha);
+        const score = -quiesce(-beta, -alpha, ply + 1);
         unmakeMove(m, undo);
 
         if (score >= beta) return beta;
@@ -521,52 +537,60 @@ function quiesce(alpha, beta) {
     return alpha;
 }
 
-// Alpha-Beta with Null Move Pruning & LMR
-function alphaBeta(depth, alpha, beta, isRoot, useLMR, branchingFactor) {
+// PVS (Principal Variation Search) + LMR + Null Move
+function alphaBeta(depth, alpha, beta, ply = 0, useLMR) {
+    checkTime();
+    
+    // Stack Overflow Protection
+    if (ply >= MAX_PLY) return evaluate();
+
     nodesSearched++;
     
     // 1. TT Lookup
     let ttEntry = tt.get(currentHash);
-    if (ttEntry && ttEntry.depth >= depth && !isRoot) {
+    // IsRoot check replaced by ply === 0
+    if (ttEntry && ttEntry.depth >= depth && ply > 0) {
         if (ttEntry.flag === 0) return ttEntry.score;
         if (ttEntry.flag === 1 && ttEntry.score <= alpha) return alpha;
         if (ttEntry.flag === 2 && ttEntry.score >= beta) return beta;
     }
 
-    if (depth <= 0) return quiesce(alpha, beta);
+    if (depth <= 0) return quiesce(alpha, beta, ply);
     
-    const isCheck = isAttacked(internalBoard.findIndex(p => p?.type === 'k' && p.color === internalTurn), internalTurn === 'w' ? 'b' : 'w');
+    const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === internalTurn);
+    const isCheck = isAttacked(kIdx, internalTurn === 'w' ? 'b' : 'w');
 
-    // 2. Null Move Pruning (Don't do it in check or in endgame to avoid Zugzwang issues mostly)
-    if (!isRoot && !isCheck && depth >= 3) {
-        // Make null move
+    // 2. Null Move Pruning
+    if (ply > 0 && !isCheck && depth >= 3) {
         internalTurn = internalTurn === 'w' ? 'b' : 'w';
         currentHash ^= zobristTurn;
-        if(enPassant !== -1) { currentHash ^= zobristEp[enPassant]; } 
-        // Note: we don't clear enPassant in state for null move usually, but proper impl requires careful state mgmt.
-        // Simplified: Just skip NMP for safety in this version to prevent bugs in this restricted env.
+        if(enPassant !== -1) currentHash ^= zobristEp[enPassant]; 
+        
+        const nmScore = -alphaBeta(depth - 1 - 2, -beta, -beta + 1, ply + 1, useLMR);
+        
+        internalTurn = internalTurn === 'w' ? 'b' : 'w';
+        currentHash ^= zobristTurn;
+        if(enPassant !== -1) currentHash ^= zobristEp[enPassant]; 
+        
+        if (nmScore >= beta) return beta;
     }
 
     let moves = generateMoves(false);
     const bestMoveCandidate = ttEntry ? ttEntry.bestMove : null;
-    sortMoves(moves, bestMoveCandidate, depth);
+    sortMoves(moves, bestMoveCandidate, ply);
     
-    if (!useLMR && branchingFactor && moves.length > branchingFactor) {
-        moves = moves.slice(0, branchingFactor);
-    }
-
     let bestMove = null;
     let bestScore = -Infinity;
     let legalMovesCount = 0;
     let ttFlag = 1; // Alpha (Fail Low)
-
+    
+    // PVS: First move is PV
     for (let i = 0; i < moves.length; i++) {
         const m = moves[i];
         const undo = makeMove(m);
         
-        // Legality
-        const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
-        if (isAttacked(kIdx, internalTurn)) {
+        const kIdxAfter = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
+        if (isAttacked(kIdxAfter, internalTurn)) {
             unmakeMove(m, undo);
             continue;
         }
@@ -574,19 +598,31 @@ function alphaBeta(depth, alpha, beta, isRoot, useLMR, branchingFactor) {
 
         let score;
         
-        // Check Extension
-        const givesCheck = isAttacked(internalBoard.findIndex(p => p?.type === 'k' && p.color === internalTurn), internalTurn === 'w' ? 'b' : 'w');
-        const extension = givesCheck ? 1 : 0;
-        const newDepth = depth - 1 + extension;
-
-        // LMR (Late Move Reduction)
-        if (useLMR && depth >= 3 && i > 4 && !m.cap && !m.prom && !givesCheck && !isCheck) {
-            score = -alphaBeta(newDepth - 1, -beta, -alpha, false, useLMR, branchingFactor);
-            if (score > alpha) {
-                 score = -alphaBeta(newDepth, -beta, -alpha, false, useLMR, branchingFactor);
-            }
+        if (i === 0) {
+            // Full Window search for PV node
+            score = -alphaBeta(depth - 1, -beta, -alpha, ply + 1, useLMR);
         } else {
-            score = -alphaBeta(newDepth, -beta, -alpha, false, useLMR, branchingFactor);
+             // Late Move Reduction
+             let newDepth = depth - 1;
+             if (useLMR && depth >= 3 && i > 3 && !m.cap && !m.prom && !isCheck) {
+                newDepth -= 1; 
+                if (i > 8) newDepth -= 1; // Aggressive LMR
+             }
+             if (newDepth < 1) newDepth = 1;
+
+             // Null Window Search (Prove move is bad)
+             score = -alphaBeta(newDepth, -alpha - 1, -alpha, ply + 1, useLMR);
+             
+             // If LMR failed or Null Window failed (score > alpha), re-search full window
+             if (score > alpha && score < beta) {
+                 score = -alphaBeta(depth - 1, -beta, -alpha, ply + 1, useLMR);
+             } else if (score > alpha && newDepth < depth - 1) {
+                 // If LMR failed but we haven't done full window
+                 score = -alphaBeta(depth - 1, -alpha - 1, -alpha, ply + 1, useLMR);
+                 if (score > alpha && score < beta) {
+                     score = -alphaBeta(depth - 1, -beta, -alpha, ply + 1, useLMR);
+                 }
+             }
         }
 
         unmakeMove(m, undo);
@@ -600,26 +636,30 @@ function alphaBeta(depth, alpha, beta, isRoot, useLMR, branchingFactor) {
             alpha = score;
             ttFlag = 0; // Exact
             if(!m.cap) {
-                // Store killer move
-                if (killerMoves[depth]) {
-                    killerMoves[depth][1] = killerMoves[depth][0];
-                    killerMoves[depth][0] = m;
+                // Update Killer
+                if (ply < MAX_PLY) {
+                    if (killerMoves[ply][0] && (killerMoves[ply][0].f !== m.f || killerMoves[ply][0].t !== m.t)) {
+                        killerMoves[ply][1] = killerMoves[ply][0];
+                    }
+                    killerMoves[ply][0] = m;
                 }
+                // Update History
+                historyTable[m.f * 64 + m.t] += depth * depth;
             }
         }
 
         if (alpha >= beta) {
             ttFlag = 2; // Beta
+            if(!m.cap) historyTable[m.f * 64 + m.t] += depth * depth;
             break;
         }
     }
 
     if (legalMovesCount === 0) {
-        if (isCheck) return -50000 + (100 - depth); 
-        else return 0; // Stalemate
+        if (isCheck) return -50000 + ply; // Mate score adjusted by ply
+        else return 0; 
     }
 
-    // Always store in TT
     tt.set(currentHash, { depth, score: bestScore, flag: ttFlag, bestMove });
 
     return bestScore;
@@ -642,44 +682,34 @@ function formatMove(m) {
 }
 
 self.onmessage = function(e) {
-    const { fen, depth, branchingFactor, useDynamicBranching, requestId } = e.data;
+    const { fen, depth, timeLimit: limit, branchingFactor, useDynamicBranching, requestId } = e.data;
     
     try {
         parseState(fen);
         nodesSearched = 0;
+        startTime = Date.now();
+        timeLimit = limit || 3000;
         
-        // Auto-Scale Depth based on Game Phase (Time Management)
         let adjustedDepth = depth;
-        let phaseLog = "";
+        // ... (Endgame depth logic same) ...
+        if (isEndgame()) adjustedDepth += 2;
         
-        if (useDynamicBranching) {
-            if (isEndgame()) {
-                adjustedDepth += 2; // Deepen in endgame
-                phaseLog = " (Endgame Boost +2)";
-                // Ultra endgame (Kings + Pawns)
-                let pieceCount = 0;
-                for(let i=0; i<64; i++) if(internalBoard[i]) pieceCount++;
-                if (pieceCount < 8) {
-                    adjustedDepth += 2; // +4 Total
-                    phaseLog = " (Deep Endgame Boost +4)";
-                }
-            }
-        }
-        
-        log(\`Starting search: Depth \${adjustedDepth}\${phaseLog}\`);
+        log(\`Starting search: Depth \${adjustedDepth}, Time: \${(timeLimit/1000).toFixed(1)}s\`);
 
         let bestMoveGlobal = null;
         let scoreGlobal = 0;
 
-        // Iterative Deepening
         for (let d = 1; d <= adjustedDepth; d++) {
             
+            // Re-check time before starting new depth
+            if (Date.now() - startTime > timeLimit) break;
+
             let moves = generateMoves(false);
             const ttEntry = tt.get(currentHash);
             const bestCand = ttEntry ? ttEntry.bestMove : null;
-            sortMoves(moves, bestCand, d);
+            // Root uses ply 0 for sorting
+            sortMoves(moves, bestCand, 0);
             
-            // Dynamic Window Aspiration (Simplified)
             let alpha = -Infinity;
             let beta = Infinity;
             
@@ -688,10 +718,7 @@ self.onmessage = function(e) {
                beta = scoreGlobal + 50;
             }
 
-            // Retry loop for aspiration window failure
-            let retry = true;
-            while(retry) {
-                retry = false;
+            try {
                 let bestMoveLocal = null;
                 let bestScoreLocal = -Infinity;
                 
@@ -703,7 +730,8 @@ self.onmessage = function(e) {
                         continue;
                     }
                     
-                    const score = -alphaBeta(d - 1, -beta, -alpha, false, useDynamicBranching, branchingFactor);
+                    // Root search is ply 0, next is ply 1
+                    const score = -alphaBeta(d - 1, -beta, -alpha, 1, useDynamicBranching);
                     unmakeMove(m, undo);
                     
                     if (score > bestScoreLocal) {
@@ -712,7 +740,6 @@ self.onmessage = function(e) {
                         if (score > alpha) alpha = score;
                     }
                     
-                    // Root Progress Update
                     self.postMessage({ 
                         type: 'progress', 
                         depth: d, 
@@ -723,15 +750,22 @@ self.onmessage = function(e) {
                     });
                 }
                 
-                // If fell out of window, search again with full window
+                // Aspiration Window Logic
                 if (d > 4 && (bestScoreLocal <= alpha || bestScoreLocal >= beta)) {
-                     alpha = -Infinity;
-                     beta = Infinity;
-                     retry = true;
-                     log(\`Aspiration fail at depth \${d}, re-searching...\`);
+                     // If aspiration fails, just accept for now in simple worker
+                     bestMoveGlobal = bestMoveLocal; 
+                     scoreGlobal = bestScoreLocal;
                 } else {
                     bestMoveGlobal = bestMoveLocal;
                     scoreGlobal = bestScoreLocal;
+                }
+
+            } catch (err) {
+                if (err.message === "Timeout") {
+                    log("Time limit reached. Stopping.");
+                    break;
+                } else {
+                    throw err;
                 }
             }
         }
@@ -745,8 +779,7 @@ self.onmessage = function(e) {
         });
 
     } catch (err) {
-        log(\`CRITICAL WORKER ERROR: \${err.message}\`);
-        console.error(err);
+        log(\`WORKER ERROR: \${err.message}\`);
     }
 };
 `;

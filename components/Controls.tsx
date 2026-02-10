@@ -57,15 +57,28 @@ export const Controls: React.FC<ControlsProps> = ({
                 <span className="text-[10px] font-mono text-amber-400">{config.depth}</span>
               </div>
               <input 
-                type="range" min="1" max="10" step="1" 
+                type="range" min="1" max="12" step="1" 
                 value={config.depth} 
                 onChange={(e) => setConfig({...config, depth: parseInt(e.target.value)})}
                 className="w-full accent-amber-500 bg-slate-700 h-1.5 rounded-lg appearance-none cursor-pointer"
               />
             </div>
             
-            <div className="flex items-center justify-between">
-               <label className="text-[10px] text-slate-300">Smart Pruning</label>
+            <div className="space-y-0.5">
+              <div className="flex justify-between">
+                <label className="text-[10px] text-slate-400">Time Limit</label>
+                <span className="text-[10px] font-mono text-amber-400">{(config.timeLimit / 1000).toFixed(1)}s</span>
+              </div>
+              <input 
+                type="range" min="500" max="15000" step="500" 
+                value={config.timeLimit} 
+                onChange={(e) => setConfig({...config, timeLimit: parseInt(e.target.value)})}
+                className="w-full accent-amber-500 bg-slate-700 h-1.5 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center justify-between col-span-2 pt-1">
+               <label className="text-[10px] text-slate-300">Smart Pruning (PVS + LMR)</label>
                <input 
                  type="checkbox"
                  checked={config.useDynamicBranching}

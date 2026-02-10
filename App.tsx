@@ -20,7 +20,8 @@ function App() {
   
   // Engine State
   const [engineConfig, setEngineConfig] = useState<EngineConfig>({ 
-    depth: 5, // Increased default depth due to optimization
+    depth: 6, 
+    timeLimit: 2000, // 2 seconds default
     branchingFactor: 10,
     useDynamicBranching: true 
   });
@@ -115,6 +116,7 @@ function App() {
               workerRef.current.postMessage({
                 fen,
                 depth: engineConfig.depth,
+                timeLimit: engineConfig.timeLimit,
                 branchingFactor: engineConfig.branchingFactor,
                 useDynamicBranching: engineConfig.useDynamicBranching,
                 requestId
@@ -238,7 +240,7 @@ function App() {
         <div className="w-full md:w-[400px] flex-shrink-0 flex flex-col gap-4">
            <header className="mb-4">
              <h1 className="text-3xl font-extrabold text-amber-500 tracking-tight">Grandmaster Logic</h1>
-             <p className="text-slate-400 text-sm">Custom TS Engine • Minimax • Alpha-Beta</p>
+             <p className="text-slate-400 text-sm">Custom TS Engine • PVS (NegaScout) • Delta Pruning</p>
            </header>
            
            <CapturedPieces history={gameState.history} />

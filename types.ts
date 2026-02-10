@@ -39,6 +39,7 @@ export interface GameState {
 
 export interface EngineConfig {
   depth: number;
+  timeLimit: number; // Time limit in milliseconds
   branchingFactor: number; // Used only if useDynamicBranching is false
   useDynamicBranching: boolean;
 }
