@@ -7,6 +7,7 @@ import { ImportExportModal } from './components/ImportExportModal';
 import { CapturedPieces } from './components/CapturedPieces';
 import { GameState, Move, EngineConfig, EngineResult, BoardState } from './types';
 import { parseFen, generateFen, getLegalMoves, makeMove, getIndex, pgnToGameState, gameStateToPgn } from './utils/chessRules';
+import { fetchOpeningMove } from './utils/openingBook';
 import { INITIAL_FEN } from './constants';
 import { workerCode } from './services/engineWorkerBuilder';
 
@@ -19,7 +20,7 @@ function App() {
   
   // Engine State
   const [engineConfig, setEngineConfig] = useState<EngineConfig>({ 
-    depth: 4, 
+    depth: 5, // Increased default depth due to optimization
     branchingFactor: 10,
     useDynamicBranching: true 
   });
@@ -78,27 +79,53 @@ function App() {
     };
   }, []);
 
-  // Trigger Engine Analysis
+  // Trigger Engine Analysis with Opening Book Check
   useEffect(() => {
-    if (engineEnabled && !gameState.isGameOver && workerRef.current) {
-      const fen = generateFen(gameState);
-      
-      const requestId = Date.now();
-      currentRequestId.current = requestId;
+    const runAnalysis = async () => {
+        if (engineEnabled && !gameState.isGameOver) {
+          const requestId = Date.now();
+          currentRequestId.current = requestId;
 
-      // Reset thinking state
-      setEngineResult(prev => ({ ...prev, isThinking: true, bestMove: null, currentDepth: 0, logs: [] })); 
-      
-      workerRef.current.postMessage({
-        fen,
-        depth: engineConfig.depth,
-        branchingFactor: engineConfig.branchingFactor,
-        useDynamicBranching: engineConfig.useDynamicBranching,
-        requestId
-      });
-    } else {
-        setEngineResult(prev => ({...prev, isThinking: false, bestMove: null }));
-    }
+          // Reset thinking state
+          setEngineResult(prev => ({ ...prev, isThinking: true, bestMove: null, currentDepth: 0, logs: [] })); 
+
+          // 1. Try Opening Book First
+          if (gameState.fullMoveNumber <= 12) { // Only check book in early game
+             setEngineResult(prev => ({ ...prev, logs: ['Checking Lichess Masters Book...'] }));
+             const bookMove = await fetchOpeningMove(gameState);
+             
+             // Check if request is still valid after await
+             if (currentRequestId.current === requestId && bookMove) {
+                 setEngineResult(prev => ({
+                     ...prev,
+                     isThinking: false,
+                     bestMove: bookMove,
+                     evaluation: 0, // Book moves are "equal" or "good" implicitly
+                     nodesSearched: 0,
+                     currentDepth: 0,
+                     logs: [...prev.logs, `Book Move Found: ${bookMove.from}->${bookMove.to}`]
+                 }));
+                 return; // Exit, do not use worker
+             }
+          }
+
+          // 2. Fallback to Engine Worker
+          if (workerRef.current && currentRequestId.current === requestId) {
+              const fen = generateFen(gameState);
+              workerRef.current.postMessage({
+                fen,
+                depth: engineConfig.depth,
+                branchingFactor: engineConfig.branchingFactor,
+                useDynamicBranching: engineConfig.useDynamicBranching,
+                requestId
+              });
+          }
+        } else {
+            setEngineResult(prev => ({...prev, isThinking: false, bestMove: null }));
+        }
+    };
+
+    runAnalysis();
   }, [gameState, engineEnabled, engineConfig]);
 
   // Handle Square Click
