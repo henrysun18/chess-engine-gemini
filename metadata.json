@@ -1,0 +1,5 @@
+{
+  "name": "Grandmaster Logic",
+  "description": "A high-performance React chess app with a custom-built Minimax engine featuring Alpha-Beta pruning, iterative deepening, and configurable search parameters.",
+  "requestFramePermissions": []
+}
