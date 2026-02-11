@@ -1,352 +1,315 @@
 
 export const workerCode = `
-// --- LOGGER ---
-function log(msg) {
-    self.postMessage({ type: 'log', message: msg });
-}
+// ============================================================================
+// GRANDMASTER LOGIC: HIGH-PERFORMANCE BITWISE ENGINE (v3.4 - Knight Fix + Repetition)
+// ============================================================================
 
 // --- CONSTANTS ---
-const SQUARES_COUNT = 64;
-const MAX_PLY = 100; // Hard limit to prevent stack overflow
+const VAL_PAWN = 100;
+const VAL_KNIGHT = 320;
+const VAL_BISHOP = 330;
+const VAL_ROOK = 500;
+const VAL_QUEEN = 900;
+const VAL_KING = 20000;
+const MATE_SCORE = 29000; 
+const MAX_PLY = 100; 
 
-// MG = Middlegame, EG = Endgame
-const PIECE_VALUES = { 
-    p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 
-};
+const COLOR_WHITE = 8;
+const COLOR_BLACK = 16;
+const TYPE_EMPTY = 0;
+const TYPE_PAWN = 1;
+const TYPE_KNIGHT = 2;
+const TYPE_BISHOP = 3;
+const TYPE_ROOK = 4;
+const TYPE_QUEEN = 5;
+const TYPE_KING = 6;
 
-// Piece Square Tables (Simplified)
-const PSTS = {
-  p: [0,0,0,0,0,0,0,0,50,50,50,50,50,50,50,50,10,10,20,30,30,20,10,10,5,5,10,25,25,10,5,5,0,0,0,20,20,0,0,0,5,-5,-10,0,0,-10,-5,5,5,10,10,-20,-20,10,10,5,0,0,0,0,0,0,0,0],
-  n: [-50,-40,-30,-30,-30,-30,-40,-50,-40,-20,0,0,0,0,-20,-40,-30,0,10,15,15,10,0,-30,-30,5,15,20,20,15,5,-30,-30,0,15,20,20,15,0,-30,-30,5,10,15,15,10,5,-30,-40,-20,0,5,5,0,-20,-40,-50,-40,-30,-30,-30,-30,-40,-50],
-  b: [-20,-10,-10,-10,-10,-10,-10,-20,-10,0,0,0,0,0,0,-10,-10,0,5,10,10,5,0,-10,-10,5,5,10,10,5,5,-10,-10,0,10,10,10,10,0,-10,-10,10,10,10,10,10,10,-10,-10,5,0,0,0,0,5,-10,-20,-10,-10,-10,-10,-10,-10,-20],
-  r: [0,0,0,0,0,0,0,0,5,10,10,10,10,10,10,5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,0,0,0,5,5,0,0,0],
-  q: [-20,-10,-10,-5,-5,-10,-10,-20,-10,0,0,0,0,0,0,-10,-10,0,5,5,5,5,0,-10,-5,0,5,5,5,5,0,-5,0,0,5,5,5,5,0,-5,-10,5,5,5,5,5,0,-10,-10,0,5,0,0,0,0,-10,-20,-10,-10,-5,-5,-10,-10,-20],
-  k: [-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-20,-30,-30,-40,-40,-30,-30,-20,-10,-20,-20,-20,-20,-20,-20,-10,20,20,0,0,0,0,20,20,20,30,10,0,0,10,30,20]
-};
+// Encoding
+const MASK_FROM = 0x3F;
+const MASK_TO = 0xFC0;
+const SHIFT_TO = 6;
+const MASK_PIECE = 0x7000;
+const SHIFT_PIECE = 12;
+const MASK_CAP = 0x38000;
+const SHIFT_CAP = 15;
+const MASK_PROM = 0x1C0000;
+const SHIFT_PROM = 18;
+const FLAG_CASTLE = 0x200000;
+const FLAG_EP = 0x400000;
+const FLAG_DOUBLE = 0x800000;
 
-const KING_ENDGAME_PST = [
-    -50,-40,-30,-20,-20,-30,-40,-50,
-    -30,-20,-10,  0,  0,-10,-20,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 30, 40, 40, 30,-10,-30,
-    -30,-10, 20, 30, 30, 20,-10,-30,
-    -30,-30,  0,  0,  0,  0,-30,-30,
-    -50,-30,-30,-30,-30,-30,-30,-50
-];
+// Tables (PeSTO)
+const MG_PAWN = [0,0,0,0,0,0,0,0,98,134,61,95,68,126,34,-11,-6,7,26,31,65,56,25,-20,-14,13,6,21,23,12,17,-23,-27,-2,-5,12,17,6,10,-25,-26,-4,-4,-10,3,3,33,-12,-35,-1,-20,-23,-15,24,38,-22,0,0,0,0,0,0,0,0];
+const EG_PAWN = [0,0,0,0,0,0,0,0,178,173,158,134,147,132,165,187,94,100,85,67,56,53,82,84,32,24,13,5,-2,4,17,17,13,9,-3,-7,-7,-8,3,-1,4,7,-6,1,0,-5,-1,-8,13,8,8,10,13,0,2,-7,0,0,0,0,0,0,0,0];
+const MG_KNIGHT = [-167,-89,-34,-49,61,-97,-15,-107,-73,-41,72,36,23,62,7,-17,-47,60,37,65,84,129,73,44,-9,17,19,53,37,69,18,22,-13,4,16,13,28,19,21,-8,-23,-9,12,10,19,17,25,-16,-29,-53,-12,-3,-1,18,-14,-19,-105,-21,-58,-33,-17,-28,-19,-23];
+const EG_KNIGHT = [-58,-38,-13,-28,-31,-27,-63,-99,-25,-8,-25,-2,-9,-25,-24,-52,-24,-20,10,9,-1,-9,-19,-41,-17,3,22,22,22,11,8,-18,-18,-6,16,25,16,17,4,-18,-23,-3,-1,15,10,-3,-20,-22,-42,-20,-10,-5,-2,-20,-23,-44,-29,-51,-23,-15,-22,-18,-50,-64];
+const MG_BISHOP = [-29,4,-82,-37,-25,-42,7,-8,-26,16,-18,-13,30,59,18,-47,-16,37,43,40,35,50,37,-2,-4,5,19,50,37,37,7,-2,-6,13,13,26,34,12,10,4,0,15,15,15,14,27,18,10,4,15,16,0,7,21,33,1,-33,-3,-14,-21,-13,-12,-39,-21];
+const EG_BISHOP = [-14,-21,-11,-8,-7,-9,-17,-24,-8,-4,7,-12,-3,-13,-4,-14,2,-8,0,-1,-2,6,0,4,-3,9,12,9,14,10,3,2,-6,3,13,19,7,10,-3,-9,-12,-3,5,10,13,3,-7,-15,-14,-18,-7,-1,4,-9,-15,-27,-23,-9,-23,-5,-9,-16,-5,-17];
+const MG_ROOK = [32,42,32,51,63,9,31,43,27,32,58,62,80,67,26,44,-5,19,26,36,17,45,61,16,-24,-11,7,26,24,35,-8,-20,-36,-26,-12,-1,9,-7,6,-23,-45,-25,-16,-17,3,0,-5,-33,-44,-16,-20,-9,-1,11,-6,-71,-19,-13,1,17,16,7,-37,-26];
+const EG_ROOK = [13,10,18,15,12,12,8,5,11,13,13,11,-3,3,8,3,7,7,7,5,4,-3,-5,-3,4,3,13,1,2,1,-1,2,3,5,8,4,-5,-6,-8,-11,-4,0,-5,-1,-7,-12,-8,-16,-18,-20,-7,-13,-13,-23,-15,-25,-14,-25,-12,-25,-27,-25,-27,-25];
+const MG_QUEEN = [-28,0,29,12,59,44,43,45,-24,-39,-5,1,-16,57,28,54,-13,-17,7,8,29,56,47,57,-27,-27,-16,-16,-1,17,-2,1,-9,-26,-9,-10,-2,-4,3,-3,-14,2,-11,-2,-5,2,14,5,-35,-8,11,2,8,15,-3,1,-1,-18,-9,10,-15,-25,-31,-50];
+const EG_QUEEN = [-9,22,22,27,27,19,10,20,-17,20,32,41,58,25,30,0,-20,6,9,49,47,35,19,9,3,22,24,45,57,40,57,36,-18,28,19,47,31,34,39,23,-16,-27,15,6,9,17,10,5,-22,-23,-30,-16,-16,-23,-36,-32,-33,-28,-22,-43,-5,-32,-20,-41];
+const MG_KING = [-65,23,16,-15,-56,-34,2,13,29,-1,-20,-7,-8,-4,-38,-29,-9,24,2,-16,-20,6,22,-22,-17,-20,-12,-27,-30,-25,-14,-36,-49,-1,-27,-39,-46,-44,-33,-51,-14,-14,-22,-46,-44,-30,-15,-27,1,7,-8,-64,-43,-16,9,8,-15,36,12,-54,8,-28,24,14];
+const EG_KING = [-74,-35,-18,-18,-11,15,4,-17,-12,17,14,17,17,38,23,11,10,17,23,15,20,45,44,13,-8,22,24,27,26,33,26,3,-18,-4,21,24,27,23,9,-11,-19,-3,11,21,23,16,7,-9,-27,-11,4,13,14,4,-5,-17,-53,-34,-21,-11,-28,-14,-24,-43];
 
-// --- GLOBAL STATE ---
-let internalBoard = new Array(64).fill(null);
-let internalTurn = 'w';
-let castleRights = 15;
+const TABLES_MG = [[],MG_PAWN,MG_KNIGHT,MG_BISHOP,MG_ROOK,MG_QUEEN,MG_KING];
+const TABLES_EG = [[],EG_PAWN,EG_KNIGHT,EG_BISHOP,EG_ROOK,EG_QUEEN,EG_KING];
+
+// Zobrist Keys
+const ZOBRIST = new Int32Array(64 * 32);
+const ZOBRIST_CASTLE = new Int32Array(16);
+const ZOBRIST_SIDE = 0x12345678;
+
+// Initialize Zobrist
+for(let i=0; i<ZOBRIST.length; i++) ZOBRIST[i] = (Math.random() * 0xFFFFFFFF) | 0;
+for(let i=0; i<ZOBRIST_CASTLE.length; i++) ZOBRIST_CASTLE[i] = (Math.random() * 0xFFFFFFFF) | 0;
+
+// State
+let board = new Int8Array(64); 
+let turn = COLOR_WHITE;
+let castleRights = 0; 
 let enPassant = -1;
-let nodesSearched = 0;
-let startTime = 0;
-let timeLimit = 0;
+let currentHash = 0;
+let positionHistory = new Int32Array(MAX_PLY + 50);
+let historyPly = 0;
 
-// Transposition Table
-const tt = new Map();
-// Limit to ~1 Million entries to stay well under browser memory limits (~100MB-200MB)
-// This prevents "Map maximum size exceeded" errors
-const TT_SIZE_LIMIT = 1000000; 
+let nodes = 0;
+let stopTime = 0;
+let lastReportTime = 0;
 
-// Killer Moves: [ply][move_index]
-let killerMoves = [];
-// History Heuristic: [from_sq * 64 + to_sq]
-let historyTable = new Int32Array(4096); 
+// Ordering Heuristics
+let killerMoves = new Int32Array(MAX_PLY * 2); 
+let history = new Int32Array(64 * 64); 
 
-// Zobrist
-let zobristTable = [];
-let zobristTurn;
-let zobristCastle = [];
-let zobristEp = [];
-let currentHash = 0n;
+// Global tracking
+let bestMoveGlobal = 0;
+let bestScoreGlobal = 0;
+let currentRequestId = 0;
+let activeDepth = 0;
 
-function initZobrist() {
-    for(let i=0; i<64 * 12; i++) zobristTable[i] = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-    zobristTurn = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-    for(let i=0; i<16; i++) zobristCastle[i] = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-    for(let i=0; i<65; i++) zobristEp[i] = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-    
-    killerMoves = new Array(MAX_PLY);
-    for(let i=0; i<MAX_PLY; i++) killerMoves[i] = [null, null];
+function log(msg) { self.postMessage({ type: 'log', message: msg, requestId: currentRequestId }); }
+
+// Helpers
+function createMove(f, t, p, cap, prom, flags) {
+    return f | (t << SHIFT_TO) | (p << SHIFT_PIECE) | (cap << SHIFT_CAP) | (prom << SHIFT_PROM) | flags;
 }
-initZobrist();
+function getFrom(m) { return m & MASK_FROM; }
+function getTo(m) { return (m & MASK_TO) >> SHIFT_TO; }
+function getPiece(m) { return (m & MASK_PIECE) >> SHIFT_PIECE; }
+function getCaptured(m) { return (m & MASK_CAP) >> SHIFT_CAP; }
+function getProm(m) { return (m & MASK_PROM) >> SHIFT_PROM; }
 
-function getPieceIndex(p) {
-    if (!p) return -1;
-    const typeOffset = {p:0, n:1, b:2, r:3, q:4, k:5}[p.type];
-    const colorOffset = p.color === 'w' ? 0 : 6;
-    return colorOffset + typeOffset;
-}
-
-function computeHash() {
-    let h = 0n;
+function getHash() {
+    let h = 0;
     for(let i=0; i<64; i++) {
-        const p = internalBoard[i];
-        if(p) h ^= zobristTable[i * 12 + getPieceIndex(p)];
+        const p = board[i];
+        if(p) h ^= ZOBRIST[i * 32 + p];
     }
-    if (internalTurn === 'b') h ^= zobristTurn;
-    h ^= zobristCastle[castleRights];
-    if (enPassant !== -1) h ^= zobristEp[enPassant];
+    if(turn === COLOR_BLACK) h ^= ZOBRIST_SIDE;
+    h ^= ZOBRIST_CASTLE[castleRights];
     return h;
 }
 
-const onBoard = (r, c) => r>=0 && r<8 && c>=0 && c<8;
-
-function parseState(fen) {
-    try {
-        const parts = fen.split(' ');
-        internalBoard = new Array(64).fill(null);
-        let row=0, col=0;
-        for (const char of parts[0]) {
-            if (char === '/') { row++; col=0; }
-            else if (/\\d/.test(char)) { col += parseInt(char); }
-            else {
-                const color = char === char.toUpperCase() ? 'w' : 'b';
-                const type = char.toLowerCase();
-                internalBoard[row*8+col] = {color, type};
-                col++;
-            }
+function parseFen(fen) {
+    board.fill(TYPE_EMPTY);
+    const parts = fen.split(' ');
+    let r=0, c=0;
+    for(const char of parts[0]) {
+        if(char === '/') { r++; c=0; }
+        else if(char >= '1' && char <= '8') { c += parseInt(char); }
+        else {
+            const color = (char === char.toUpperCase()) ? COLOR_WHITE : COLOR_BLACK;
+            const typeChar = char.toLowerCase();
+            const type = {p:1, n:2, b:3, r:4, q:5, k:6}[typeChar];
+            board[r*8+c] = color | type;
+            c++;
         }
-        internalTurn = parts[1];
-        
-        castleRights = 0;
-        if (parts[2].includes('K')) castleRights |= 1;
-        if (parts[2].includes('Q')) castleRights |= 2;
-        if (parts[2].includes('k')) castleRights |= 4;
-        if (parts[2].includes('q')) castleRights |= 8;
-        
-        enPassant = parts[3] === '-' ? -1 : 
-            (8 - parseInt(parts[3][1])) * 8 + (parts[3].charCodeAt(0) - 'a'.charCodeAt(0));
-
-        currentHash = computeHash();
-    } catch (e) {
-        log("Error parsing FEN: " + e.message);
     }
+    turn = parts[1] === 'w' ? COLOR_WHITE : COLOR_BLACK;
+    castleRights = 0;
+    if(parts[2].includes('K')) castleRights |= 1;
+    if(parts[2].includes('Q')) castleRights |= 2;
+    if(parts[2].includes('k')) castleRights |= 4;
+    if(parts[2].includes('q')) castleRights |= 8;
+    enPassant = parts[3] === '-' ? -1 : 
+        (8 - parseInt(parts[3][1])) * 8 + (parts[3].charCodeAt(0) - 97);
+    
+    currentHash = getHash();
+    historyPly = 0;
+    positionHistory[historyPly++] = currentHash;
 }
 
-// --- EVALUATION ---
 function evaluate() {
-    let mgScore = 0; 
-    let egScore = 0; 
-    let phase = 0;
-    
-    const phaseWeights = { p: 0, n: 1, b: 1, r: 2, q: 4, k: 0 };
-    
-    const wPawns = [];
-    const bPawns = [];
-
-    for (let i = 0; i < 64; i++) {
-        const p = internalBoard[i];
-        if (!p) continue;
-
-        phase += phaseWeights[p.type];
+    let mg = 0, eg = 0, gamePhase = 0;
+    for(let i=0; i<64; i++) {
+        const p = board[i];
+        if(!p) continue;
+        const type = p & 7;
+        const color = p & 24; 
         
-        let val = PIECE_VALUES[p.type];
-        let pstIdx = p.color === 'w' ? i : 63 - i;
+        if (type === TYPE_KNIGHT || type === TYPE_BISHOP) gamePhase += 1;
+        if (type === TYPE_ROOK) gamePhase += 2;
+        if (type === TYPE_QUEEN) gamePhase += 4;
         
-        // 1. Material & PST
-        let positionalVal = PSTS[p.type][pstIdx];
+        let idx = i;
+        if (color === COLOR_BLACK) idx = i ^ 56;
         
-        if (p.color === 'w') {
-            mgScore += val + positionalVal;
-            egScore += val + (p.type === 'k' ? KING_ENDGAME_PST[pstIdx] : positionalVal);
-            if(p.type === 'p') wPawns.push(i);
-        } else {
-            mgScore -= (val + positionalVal);
-            egScore -= (val + (p.type === 'k' ? KING_ENDGAME_PST[pstIdx] : positionalVal));
-            if(p.type === 'p') bPawns.push(i);
-        }
+        let m = TABLES_MG[type][idx];
+        let e = TABLES_EG[type][idx];
+        
+        if (type === TYPE_PAWN) { m += VAL_PAWN; e += VAL_PAWN; }
+        else if (type === TYPE_KNIGHT) { m += VAL_KNIGHT; e += VAL_KNIGHT; }
+        else if (type === TYPE_BISHOP) { m += VAL_BISHOP; e += VAL_BISHOP; }
+        else if (type === TYPE_ROOK) { m += VAL_ROOK; e += VAL_ROOK; }
+        else if (type === TYPE_QUEEN) { m += VAL_QUEEN; e += VAL_QUEEN; }
+        
+        if (color === COLOR_WHITE) { mg += m; eg += e; }
+        else { mg -= m; eg -= e; }
     }
-
-    // 2. Pawn Structure
-    const wFiles = new Int8Array(8);
-    const bFiles = new Int8Array(8);
-    for(let i=0; i<wPawns.length; i++) wFiles[wPawns[i]%8]++;
-    for(let i=0; i<bPawns.length; i++) bFiles[bPawns[i]%8]++;
-
-    let wStructPenalty = 0;
-    let bStructPenalty = 0;
-
-    for(let f=0; f<8; f++) {
-        if (wFiles[f] > 1) wStructPenalty += 20; 
-        if (bFiles[f] > 1) bStructPenalty += 20;
-        if (wFiles[f] > 0 && (f===0 || wFiles[f-1]===0) && (f===7 || wFiles[f+1]===0)) wStructPenalty += 15;
-        if (bFiles[f] > 0 && (f===0 || bFiles[f-1]===0) && (f===7 || bFiles[f+1]===0)) bStructPenalty += 15;
-    }
-
-    mgScore += (bStructPenalty - wStructPenalty);
-    egScore += (bStructPenalty - wStructPenalty);
-
-    const mgPhase = Math.min(24, phase);
+    const mgPhase = Math.min(24, gamePhase);
     const egPhase = 24 - mgPhase;
+    let score = (mg * mgPhase + eg * egPhase) / 24;
     
-    const finalScore = (mgScore * mgPhase + egScore * egPhase) / 24;
-
-    return internalTurn === 'w' ? finalScore : -finalScore;
+    if (score > 15000) score = 15000;
+    if (score < -15000) score = -15000;
+    
+    return turn === COLOR_WHITE ? score : -score;
 }
 
-function isEndgame() {
-    let material = 0;
-    for(let i=0; i<64; i++) {
-        const p = internalBoard[i];
-        if(p && p.type !== 'p' && p.type !== 'k') {
-            material += PIECE_VALUES[p.type];
-        }
+function getSEE(move) {
+    const piece = getPiece(move);
+    const captured = getCaptured(move);
+    let score = 0;
+    if(captured) {
+        const valMap = [0, 100, 320, 330, 500, 900, 20000];
+        score = valMap[captured] - valMap[piece];
     }
-    return material < 1500;
+    return score; 
 }
 
 function isAttacked(sq, byColor) {
-    const r = Math.floor(sq/8), c = sq%8;
-    const pr = byColor === 'w' ? r+1 : r-1;
-    if (onBoard(pr, c-1)) { const p=internalBoard[pr*8+c-1]; if(p && p.color===byColor && p.type==='p') return true; }
-    if (onBoard(pr, c+1)) { const p=internalBoard[pr*8+c+1]; if(p && p.color===byColor && p.type==='p') return true; }
+    const pawnDir = byColor === COLOR_WHITE ? 8 : -8;
+    const pawnRow = byColor === COLOR_WHITE ? (sq>>3)+1 : (sq>>3)-1;
+    if(pawnRow>=0 && pawnRow<8) {
+        const c = sq&7;
+        if(c>0) { const idx = (pawnRow<<3)+(c-1); if((board[idx]&byColor) && (board[idx]&7)===TYPE_PAWN) return true; }
+        if(c<7) { const idx = (pawnRow<<3)+(c+1); if((board[idx]&byColor) && (board[idx]&7)===TYPE_PAWN) return true; }
+    }
     
-    const kn = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
-    for(let i=0; i<8; i++) {
-        const nr = r+kn[i][0], nc=c+kn[i][1];
-        if(onBoard(nr, nc)) {
-            const p=internalBoard[nr*8+nc];
-            if(p && p.color===byColor && p.type==='n') return true;
+    const kDirs = [-17,-15,-10,-6,6,10,15,17];
+    for(let d of kDirs) {
+        const t = sq+d;
+        if(t>=0 && t<64 && Math.abs((t&7)-(sq&7))<=2) {
+            if((board[t] & byColor) && (board[t]&7)===TYPE_KNIGHT) return true;
         }
     }
-
-    const ki = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+    
+    const dirs = [-9, -7, 7, 9, -8, -1, 1, 8];
     for(let i=0; i<8; i++) {
-         const nr = r+ki[i][0], nc=c+ki[i][1];
-         if(onBoard(nr, nc)) {
-            const p=internalBoard[nr*8+nc];
-            if(p && p.color===byColor && p.type==='k') return true;
-        }
-    }
-
-    const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
-    for(let d=0; d<8; d++) {
-        let nr=r+dirs[d][0], nc=c+dirs[d][1];
-        while(onBoard(nr,nc)) {
-            const p = internalBoard[nr*8+nc];
-            if(p) {
-                if(p.color === byColor) {
-                    if(p.type==='q') return true;
-                    if(d<4 && p.type==='r') return true;
-                    if(d>=4 && p.type==='b') return true;
-                }
-                break;
-            }
-            nr+=dirs[d][0]; nc+=dirs[d][1];
+        let d = dirs[i];
+        let t = sq + d;
+        while(t>=0 && t<64) {
+             const c1 = (t-d)&7, c2 = t&7;
+             if(Math.abs(c2-c1) > 1 && d !== 8 && d !== -8) break; 
+             if(Math.abs(c2-c1) > 1 && (d===1 || d===-1)) break;
+             
+             const p = board[t];
+             if(p) {
+                 if(p & byColor) {
+                     const type = p&7;
+                     if(type === TYPE_QUEEN) return true;
+                     if(i < 4 && type === TYPE_BISHOP) return true; 
+                     if(i >= 4 && type === TYPE_ROOK) return true;
+                 }
+                 break;
+             }
+             t += d;
         }
     }
     return false;
 }
 
-function generateMoves(capturesOnly = false) {
+function generateMoves(capsOnly) {
     const moves = [];
-    const turn = internalTurn;
-    const enemy = turn === 'w' ? 'b' : 'w';
-
-    for (let i=0; i<64; i++) {
-        const p = internalBoard[i];
-        if (!p || p.color !== turn) continue;
+    const us = turn;
+    const them = us === COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE;
+    
+    for(let i=0; i<64; i++) {
+        const p = board[i];
+        if(!p || (p & us) === 0) continue;
+        const type = p & 7;
         
-        const r = Math.floor(i/8), c = i%8;
-
-        if (p.type === 'p') {
-            const fw = turn === 'w' ? -1 : 1;
-            const promRow = turn === 'w' ? 0 : 7;
-            const startRow = turn === 'w' ? 6 : 1;
-            
-            if (!capturesOnly) {
-                const f1 = (r+fw)*8+c;
-                if (onBoard(r+fw, c) && !internalBoard[f1]) {
-                    if (r+fw === promRow) {
-                        ['q','n'].forEach(pr => moves.push({f:i, t:f1, p:p, prom:pr, val: PIECE_VALUES[pr]}));
+        if(type === TYPE_PAWN) {
+            const dir = us === COLOR_WHITE ? -8 : 8;
+            const startR = us === COLOR_WHITE ? 6 : 1;
+            const promR = us === COLOR_WHITE ? 0 : 7;
+            const t = i + dir;
+            if (!capsOnly && board[t] === 0) {
+                if ((t >> 3) === promR) {
+                     moves.push(createMove(i, t, type, 0, TYPE_QUEEN, 0));
+                     moves.push(createMove(i, t, type, 0, TYPE_KNIGHT, 0));
+                } else {
+                    moves.push(createMove(i, t, type, 0, 0, 0));
+                    if ((i >> 3) === startR && board[i + dir*2] === 0) {
+                        moves.push(createMove(i, i + dir*2, type, 0, 0, FLAG_DOUBLE));
+                    }
+                }
+            }
+            const caps = [i+dir-1, i+dir+1];
+            for(let ct of caps) {
+                if(ct < 0 || ct > 63) continue;
+                if(Math.abs((ct&7) - (i&7)) > 1) continue; 
+                const target = board[ct];
+                if(target && (target & them)) {
+                    if ((ct >> 3) === promR) {
+                         moves.push(createMove(i, ct, type, target&7, TYPE_QUEEN, 0));
                     } else {
-                        moves.push({f:i, t:f1, p:p});
-                        const f2 = (r+fw*2)*8+c;
-                        if (r===startRow && !internalBoard[f2]) {
-                            moves.push({f:i, t:f2, p:p, flag:'pd'});
-                        }
+                        moves.push(createMove(i, ct, type, target&7, 0, 0));
                     }
                 }
+                if(ct === enPassant) moves.push(createMove(i, ct, type, TYPE_PAWN, 0, FLAG_EP));
             }
-            
-            const caps = [[fw, -1], [fw, 1]];
-            for(let k=0; k<2; k++) {
-                 const dr=caps[k][0], dc=caps[k][1];
-                 if (onBoard(r+dr, c+dc)) {
-                     const ti = (r+dr)*8+c+dc;
-                     const t = internalBoard[ti];
-                     if (t && t.color === enemy) {
-                         if (r+dr === promRow) {
-                             ['q','n'].forEach(pr => moves.push({f:i, t:ti, p:p, cap:t, prom:pr, val: PIECE_VALUES[pr] + PIECE_VALUES[t.type]}));
-                         } else {
-                             moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
-                         }
-                     }
-                     if (enPassant === ti) {
-                         moves.push({f:i, t:ti, p:p, cap:{type:'p', color:enemy}, flag:'ep', val: 100});
-                     }
-                 }
-            }
-        } else if (p.type === 'n') {
-            const dirs = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
-            for(let k=0; k<8; k++) {
-                const dr=dirs[k][0], dc=dirs[k][1];
-                if(onBoard(r+dr, c+dc)) {
-                    const ti = (r+dr)*8+c+dc;
-                    const t = internalBoard[ti];
-                    if (!t) {
-                        if(!capturesOnly) moves.push({f:i, t:ti, p:p});
-                    } else if (t.color === enemy) {
-                        moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
-                    }
-                }
-            }
-        } else if (p.type === 'k') {
-             const dirs = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-             for(let k=0; k<8; k++) {
-                 const dr=dirs[k][0], dc=dirs[k][1];
-                 if(onBoard(r+dr, c+dc)) {
-                    const ti = (r+dr)*8+c+dc;
-                    const t = internalBoard[ti];
-                    if (!t) {
-                        if(!capturesOnly) moves.push({f:i, t:ti, p:p});
-                    } else if (t.color === enemy) {
-                        moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
-                    }
-                 }
-             }
-             if (!capturesOnly) {
-                 if (turn === 'w') {
-                     if ((castleRights & 1) && !internalBoard[61] && !internalBoard[62] && !isAttacked(60, 'b') && !isAttacked(61, 'b') && !isAttacked(62, 'b')) 
-                        moves.push({f:60, t:62, p:p, flag:'c'});
-                     if ((castleRights & 2) && !internalBoard[59] && !internalBoard[58] && !internalBoard[57] && !isAttacked(60, 'b') && !isAttacked(59, 'b') && !isAttacked(58, 'b')) 
-                        moves.push({f:60, t:58, p:p, flag:'c'});
-                 } else {
-                     if ((castleRights & 4) && !internalBoard[5] && !internalBoard[6] && !isAttacked(4, 'w') && !isAttacked(5, 'w') && !isAttacked(6, 'w')) 
-                        moves.push({f:4, t:6, p:p, flag:'c'});
-                     if ((castleRights & 8) && !internalBoard[3] && !internalBoard[2] && !internalBoard[1] && !isAttacked(4, 'w') && !isAttacked(3, 'w') && !isAttacked(2, 'w')) 
-                        moves.push({f:4, t:2, p:p, flag:'c'});
-                 }
-             }
         } else {
-            const dirs = (p.type==='b'||p.type==='q' ? [[-1,-1],[-1,1],[1,-1],[1,1]] : []).concat(
-                         (p.type==='r'||p.type==='q' ? [[-1,0],[1,0],[0,-1],[0,1]] : []));
-            for(let d=0; d<dirs.length; d++) {
-                let nr=r+dirs[d][0], nc=c+dirs[d][1];
-                while(onBoard(nr,nc)) {
-                    const ti = nr*8+nc;
-                    const t = internalBoard[ti];
-                    if(!t) {
-                        if(!capturesOnly) moves.push({f:i, t:ti, p:p});
+            let dirs = [];
+            if(type === TYPE_KNIGHT) dirs = [-17,-15,-10,-6,6,10,15,17];
+            else if(type === TYPE_BISHOP) dirs = [-9,-7,7,9];
+            else if(type === TYPE_ROOK) dirs = [-8,-1,1,8];
+            else if(type === TYPE_QUEEN || type === TYPE_KING) dirs = [-9,-8,-7,-1,1,7,8,9];
+            const sliding = (type === TYPE_BISHOP || type === TYPE_ROOK || type === TYPE_QUEEN);
+            
+            for(let d of dirs) {
+                let to = i + d;
+                while(to >= 0 && to < 64) {
+                    const c2 = to & 7, c1 = (to-d) & 7;
+                    if(sliding || type === TYPE_KING) {
+                        if (Math.abs(c2-c1) > 1 && d !== 8 && d !== -8) break; 
+                    } else if (type === TYPE_KNIGHT) {
+                        if (Math.abs(c2-c1) > 2) break; // Fix for Knight wrapping
+                    }
+                    
+                    const target = board[to];
+                    if(target === 0) {
+                        if(!capsOnly) moves.push(createMove(i, to, type, 0, 0, 0));
                     } else {
-                        if (t.color === enemy) moves.push({f:i, t:ti, p:p, cap:t, val: PIECE_VALUES[t.type]});
+                        if(target & them) moves.push(createMove(i, to, type, target&7, 0, 0));
                         break;
                     }
-                    nr+=dirs[d][0]; nc+=dirs[d][1];
+                    if(!sliding) break;
+                    to += d;
                 }
+            }
+            if(type === TYPE_KING && !capsOnly) {
+                 if(us === COLOR_WHITE) {
+                     if((castleRights & 1) && board[61]===0 && board[62]===0 && !isAttacked(60,them) && !isAttacked(61,them))
+                        moves.push(createMove(60, 62, TYPE_KING, 0, 0, FLAG_CASTLE));
+                     if((castleRights & 2) && board[59]===0 && board[58]===0 && board[57]===0 && !isAttacked(60,them) && !isAttacked(59,them))
+                        moves.push(createMove(60, 58, TYPE_KING, 0, 0, FLAG_CASTLE));
+                 } else {
+                     if((castleRights & 4) && board[5]===0 && board[6]===0 && !isAttacked(4,them) && !isAttacked(5,them))
+                        moves.push(createMove(4, 6, TYPE_KING, 0, 0, FLAG_CASTLE));
+                     if((castleRights & 8) && board[3]===0 && board[2]===0 && board[1]===0 && !isAttacked(4,them) && !isAttacked(3,them))
+                        moves.push(createMove(4, 2, TYPE_KING, 0, 0, FLAG_CASTLE));
+                 }
             }
         }
     }
@@ -354,501 +317,325 @@ function generateMoves(capturesOnly = false) {
 }
 
 function makeMove(m) {
-    const undo = {
-        ep: enPassant,
-        cr: castleRights,
-        hash: currentHash,
-        cap: internalBoard[m.t]
-    };
-
-    const fromP = internalBoard[m.f];
-    if (fromP) currentHash ^= zobristTable[m.f * 12 + getPieceIndex(fromP)];
-    internalBoard[m.f] = null;
-
-    if (m.cap) {
-        if (m.flag === 'ep') {
-            const capIdx = internalTurn === 'w' ? m.t + 8 : m.t - 8;
-            const capP = internalBoard[capIdx];
-            if (capP) currentHash ^= zobristTable[capIdx * 12 + getPieceIndex(capP)];
-            internalBoard[capIdx] = null;
-        } else {
-            const capP = internalBoard[m.t];
-            if (capP) currentHash ^= zobristTable[m.t * 12 + getPieceIndex(capP)];
-        }
-    }
-
-    const movingP = m.prom ? {color: m.p.color, type: m.prom} : m.p;
-    currentHash ^= zobristTable[m.t * 12 + getPieceIndex(movingP)];
-    internalBoard[m.t] = movingP;
-
-    if (m.flag === 'c') {
-        let rFrom, rTo;
-        if (m.t === 62) { rFrom=63; rTo=61; }
-        else if (m.t === 58) { rFrom=56; rTo=59; }
-        else if (m.t === 6) { rFrom=7; rTo=5; }
-        else if (m.t === 2) { rFrom=0; rTo=3; }
-        
-        const rook = internalBoard[rFrom];
-        if (rook) {
-            currentHash ^= zobristTable[rFrom * 12 + getPieceIndex(rook)];
-            internalBoard[rFrom] = null;
-            currentHash ^= zobristTable[rTo * 12 + getPieceIndex(rook)];
-            internalBoard[rTo] = rook;
-        }
-    }
-
-    currentHash ^= zobristCastle[castleRights];
-    if (movingP.type === 'k') {
-        if (movingP.color === 'w') castleRights &= ~3;
-        else castleRights &= ~12;
-    }
-    const updateRookRights = (idx) => {
-        if (idx === 63) castleRights &= ~1;
-        if (idx === 56) castleRights &= ~2;
-        if (idx === 7) castleRights &= ~4;
-        if (idx === 0) castleRights &= ~8;
-    };
-    updateRookRights(m.f);
-    updateRookRights(m.t);
-    if(m.cap && m.flag !== 'ep') updateRookRights(m.t);
-    currentHash ^= zobristCastle[castleRights];
-
-    if (enPassant !== -1) currentHash ^= zobristEp[enPassant];
-    if (m.flag === 'pd') {
-        enPassant = internalTurn === 'w' ? m.f - 8 : m.f + 8;
-        currentHash ^= zobristEp[enPassant];
-    } else {
-        enPassant = -1;
-    }
-
-    currentHash ^= zobristTurn;
-    internalTurn = internalTurn === 'w' ? 'b' : 'w';
-
-    return undo;
-}
-
-function unmakeMove(m, undo) {
-    internalTurn = internalTurn === 'w' ? 'b' : 'w';
-    currentHash = undo.hash;
-    enPassant = undo.ep;
-    castleRights = undo.cr;
-
-    internalBoard[m.f] = m.p;
+    const f = getFrom(m), t = getTo(m);
+    const p = board[f], cap = board[t];
+    const state = { ep: enPassant, cr: castleRights, cap: cap, hash: currentHash };
     
-    if (m.flag === 'ep') {
-        internalBoard[m.t] = null;
-        const capIdx = internalTurn === 'w' ? m.t + 8 : m.t - 8;
-        internalBoard[capIdx] = m.cap;
+    // Zobrist: Remove piece from From
+    currentHash ^= ZOBRIST[f * 32 + p];
+    
+    board[t] = p; board[f] = 0;
+    
+    // Zobrist: Remove captured from To
+    if(cap) currentHash ^= ZOBRIST[t * 32 + cap];
+    
+    // Zobrist: Add piece to To (or Prom)
+    const prom = getProm(m);
+    if(prom) {
+        board[t] = (p & 24) | prom;
+        currentHash ^= ZOBRIST[t * 32 + board[t]];
     } else {
-        internalBoard[m.t] = m.cap || null;
+        currentHash ^= ZOBRIST[t * 32 + p];
     }
 
-    if (m.flag === 'c') {
-         if (m.t === 62) { internalBoard[63]=internalBoard[61]; internalBoard[61]=null; }
-         else if (m.t === 58) { internalBoard[56]=internalBoard[59]; internalBoard[59]=null; }
-         else if (m.t === 6) { internalBoard[7]=internalBoard[5]; internalBoard[5]=null; }
-         else if (m.t === 2) { internalBoard[0]=internalBoard[3]; internalBoard[3]=null; }
+    if(m & FLAG_EP) {
+        const epSq = (p & COLOR_WHITE) ? t + 8 : t - 8;
+        const epP = board[epSq];
+        board[epSq] = 0;
+        currentHash ^= ZOBRIST[epSq * 32 + epP];
+    }
+    
+    // Castle Rights Update
+    currentHash ^= ZOBRIST_CASTLE[castleRights]; // Remove old CR
+    if(m & FLAG_CASTLE) {
+        if(t === 62) { 
+            board[61]=board[63]; board[63]=0; 
+            currentHash ^= ZOBRIST[63 * 32 + board[61]]; // Remove rook from h1
+            currentHash ^= ZOBRIST[61 * 32 + board[61]]; // Add rook to f1
+        }
+        else if(t === 58) { 
+            board[59]=board[56]; board[56]=0; 
+            currentHash ^= ZOBRIST[56 * 32 + board[59]];
+            currentHash ^= ZOBRIST[59 * 32 + board[59]];
+        }
+        else if(t === 6) { 
+            board[5]=board[7]; board[7]=0; 
+            currentHash ^= ZOBRIST[7 * 32 + board[5]];
+            currentHash ^= ZOBRIST[5 * 32 + board[5]];
+        }
+        else if(t === 2) { 
+            board[3]=board[0]; board[0]=0; 
+            currentHash ^= ZOBRIST[0 * 32 + board[3]];
+            currentHash ^= ZOBRIST[3 * 32 + board[3]];
+        }
+    }
+    
+    if(p & 7 === TYPE_KING) { if(p & COLOR_WHITE) castleRights &= ~3; else castleRights &= ~12; }
+    if(f===0 || t===0) castleRights &= ~8;
+    if(f===7 || t===7) castleRights &= ~4;
+    if(f===56 || t===56) castleRights &= ~2;
+    if(f===63 || t===63) castleRights &= ~1;
+    currentHash ^= ZOBRIST_CASTLE[castleRights]; // Add new CR
+
+    enPassant = (m & FLAG_DOUBLE) ? (f+t)/2 : -1;
+    turn = (turn === COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    currentHash ^= ZOBRIST_SIDE;
+    
+    positionHistory[historyPly++] = currentHash;
+    
+    return state;
+}
+
+function unmakeMove(m, state) {
+    historyPly--;
+    currentHash = state.hash;
+    turn = (turn === COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    enPassant = state.ep; castleRights = state.cr;
+    const f = getFrom(m), t = getTo(m);
+    const p = turn | getPiece(m);
+    board[f] = p; board[t] = state.cap;
+    if(m & FLAG_EP) { board[t] = 0; board[(turn === COLOR_WHITE) ? t + 8 : t - 8] = (turn === COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE) | TYPE_PAWN; }
+    if(m & FLAG_CASTLE) {
+        if(t === 62) { board[63]=board[61]; board[61]=0; }
+        else if(t === 58) { board[56]=board[59]; board[59]=0; }
+        else if(t === 6) { board[7]=board[5]; board[5]=0; }
+        else if(t === 2) { board[0]=board[3]; board[3]=0; }
     }
 }
 
-// Sorting: TT Best -> Captures (MVV/LVA) -> Killer -> History -> Remaining
-function sortMoves(moves, bestMove, ply) {
-    moves.sort((a, b) => {
-        if (bestMove && a.f === bestMove.f && a.t === bestMove.t) return 2000000;
-        if (bestMove && b.f === bestMove.f && b.t === bestMove.t) return -2000000;
+function orderMoves(moves, bestMove, ply) {
+    moves.sort((a,b) => {
+        if(bestMove && a === bestMove) return -100000;
+        if(bestMove && b === bestMove) return 100000;
         
-        // MVV/LVA
-        const valA = a.val || 0;
-        const valB = b.val || 0;
-        if (valA !== valB) return valB - valA;
+        const capA = getCaptured(a), capB = getCaptured(b);
+        if(capA !== capB) return capB - capA; 
         
-        // Promotions
-        if (a.prom && !b.prom) return 10000;
-        if (!a.prom && b.prom) return -10000;
-
-        // Killer Moves
-        if (ply < MAX_PLY && killerMoves[ply]) {
-            if (killerMoves[ply][0] && a.f === killerMoves[ply][0].f && a.t === killerMoves[ply][0].t) return 900;
-            if (killerMoves[ply][0] && b.f === killerMoves[ply][0].f && b.t === killerMoves[ply][0].t) return -900;
-            if (killerMoves[ply][1] && a.f === killerMoves[ply][1].f && a.t === killerMoves[ply][1].t) return 800;
-            if (killerMoves[ply][1] && b.f === killerMoves[ply][1].f && b.t === killerMoves[ply][1].t) return -800;
+        if (ply < MAX_PLY) {
+             if (killerMoves[ply * 2] === a) return 900;
+             if (killerMoves[ply * 2 + 1] === a) return 800;
+             if (killerMoves[ply * 2] === b) return -900;
+             if (killerMoves[ply * 2 + 1] === b) return -800;
         }
-        
-        // History Heuristic
-        const histA = historyTable[a.f * 64 + a.t];
-        const histB = historyTable[b.f * 64 + b.t];
-        return histB - histA;
+
+        const ha = history[getFrom(a) * 64 + getTo(a)];
+        const hb = history[getFrom(b) * 64 + getTo(b)];
+        return hb - ha;
     });
 }
 
-function checkTime() {
-    if ((nodesSearched & 1023) === 0) {
-        if (Date.now() - startTime > timeLimit) {
-            throw new Error("Timeout");
-        }
+function isRepetition() {
+    // Check backwards from current position
+    // Simple 3-fold rule: if position appears 3 times total (2 times previously).
+    // In search, if we encounter the current hash once in the path, it's a cycle (1 repetition).
+    // Since we only track search path here (not full game history), any match is a cycle.
+    // Return draw for cycle.
+    for(let i = historyPly - 2; i >= 0; i--) {
+        if(positionHistory[i] === currentHash) return true;
     }
+    return false;
 }
 
-function quiesce(alpha, beta, ply = 0) {
-    checkTime();
-    
-    // Stack Overflow Protection
-    if (ply >= MAX_PLY) return evaluate();
-
-    nodesSearched++;
-    const standPat = evaluate();
-    if (standPat >= beta) return beta;
-    
-    // Delta Pruning
-    const BIG_DELTA = 950; 
-    if (standPat < alpha - BIG_DELTA) {
-        return alpha; 
+function qsearch(alpha, beta) {
+    if((nodes & 2047) === 0) {
+        const now = Date.now();
+        if(now > stopTime) throw "Timeout";
+        if(now - lastReportTime > 500) {
+            self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
+            lastReportTime = now;
+        }
     }
-
-    if (alpha < standPat) alpha = standPat;
-
+    nodes++;
+    
+    const standPat = evaluate();
+    if(standPat >= beta) return beta;
+    if(alpha < standPat) alpha = standPat;
+    
     const moves = generateMoves(true);
-    sortMoves(moves, null, ply);
-
-    for (const m of moves) {
-        const undo = makeMove(m);
+    orderMoves(moves, null, 0); 
+    
+    for(let m of moves) {
+        if(getSEE(m) < 0) continue; 
+        const state = makeMove(m);
         
-        const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
-        if (isAttacked(kIdx, internalTurn)) {
-            unmakeMove(m, undo);
+        const us = turn === COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE;
+        const kSq = board.findIndex((x) => (x & us) && (x & 7) === TYPE_KING);
+        if(isAttacked(kSq, turn)) { 
+            unmakeMove(m, state);
             continue;
         }
 
-        const score = -quiesce(-beta, -alpha, ply + 1);
-        unmakeMove(m, undo);
-
-        if (score >= beta) return beta;
-        if (score > alpha) alpha = score;
+        const score = -qsearch(-beta, -alpha);
+        unmakeMove(m, state);
+        if(score >= beta) return beta;
+        if(score > alpha) alpha = score;
     }
     return alpha;
 }
 
-// PVS (Principal Variation Search) + LMR + Null Move
-function alphaBeta(depth, alpha, beta, ply = 0, useLMR) {
-    checkTime();
+function alphabeta(depth, alpha, beta, ply) {
+    if((nodes & 2047) === 0) {
+        const now = Date.now();
+        if(now > stopTime) throw "Timeout";
+        if(now - lastReportTime > 500) {
+             self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
+             lastReportTime = now;
+        }
+    }
+    nodes++;
     
-    // Stack Overflow Protection
+    if (ply > 0 && isRepetition()) return 0; // Draw by repetition/cycle
     if (ply >= MAX_PLY) return evaluate();
 
-    nodesSearched++;
-    
-    // 1. TT Lookup
-    let ttEntry = tt.get(currentHash);
-    if (ttEntry && ttEntry.depth >= depth && ply > 0) {
-        if (ttEntry.flag === 0) return ttEntry.score;
-        if (ttEntry.flag === 1 && ttEntry.score <= alpha) return alpha;
-        if (ttEntry.flag === 2 && ttEntry.score >= beta) return beta;
-    }
+    const mateScore = MATE_SCORE - ply;
+    if (alpha < -mateScore) alpha = -mateScore;
+    if (beta > mateScore - 1) beta = mateScore - 1;
+    if (alpha >= beta) return alpha;
 
-    if (depth <= 0) return quiesce(alpha, beta, ply);
+    const kSq = board.findIndex((x) => (x & turn) && (x & 7) === TYPE_KING);
+    const inCheck = isAttacked(kSq, turn === COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE);
     
-    const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === internalTurn);
-    const isCheck = isAttacked(kIdx, internalTurn === 'w' ? 'b' : 'w');
-
-    // 2. Null Move Pruning
-    if (ply > 0 && !isCheck && depth >= 3) {
-        internalTurn = internalTurn === 'w' ? 'b' : 'w';
-        currentHash ^= zobristTurn;
-        if(enPassant !== -1) currentHash ^= zobristEp[enPassant]; 
-        
-        const nmScore = -alphaBeta(depth - 1 - 2, -beta, -beta + 1, ply + 1, useLMR);
-        
-        internalTurn = internalTurn === 'w' ? 'b' : 'w';
-        currentHash ^= zobristTurn;
-        if(enPassant !== -1) currentHash ^= zobristEp[enPassant]; 
-        
-        if (nmScore >= beta) return beta;
-    }
-
-    let moves = generateMoves(false);
-    const bestMoveCandidate = ttEntry ? ttEntry.bestMove : null;
-    sortMoves(moves, bestMoveCandidate, ply);
+    if(inCheck) depth++;
     
-    let bestMove = null;
-    let bestScore = -Infinity;
-    let legalMovesCount = 0;
-    let ttFlag = 1; // Alpha (Fail Low)
+    if(depth <= 0) return qsearch(alpha, beta);
     
-    // PVS: First move is PV
-    for (let i = 0; i < moves.length; i++) {
-        const m = moves[i];
-        const undo = makeMove(m);
+    const moves = generateMoves(false);
+    orderMoves(moves, null, ply);
+    
+    let moveCount = 0;
+    let bestScore = -30000;
+    let bestMoveLocal = 0;
+    
+    for(let m of moves) {
+        const state = makeMove(m);
         
-        const kIdxAfter = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
-        if (isAttacked(kIdxAfter, internalTurn)) {
-            unmakeMove(m, undo);
+        const us = turn === COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE;
+        const kSqAfter = board.findIndex((x) => (x & us) && (x & 7) === TYPE_KING);
+        if(isAttacked(kSqAfter, turn)) { 
+            unmakeMove(m, state);
             continue;
         }
-        legalMovesCount++;
-
-        let score;
         
-        if (i === 0) {
-            // Full Window search for PV node
-            score = -alphaBeta(depth - 1, -beta, -alpha, ply + 1, useLMR);
+        moveCount++;
+        let score;
+        if(moveCount === 1) {
+            score = -alphabeta(depth - 1, -beta, -alpha, ply + 1);
         } else {
-             // Late Move Reduction
-             let newDepth = depth - 1;
-             if (useLMR && depth >= 3 && i > 3 && !m.cap && !m.prom && !isCheck) {
-                newDepth -= 1; 
-                if (i > 8) newDepth -= 1; // Aggressive LMR
-             }
-             if (newDepth < 1) newDepth = 1;
-
-             // Null Window Search (Prove move is bad)
-             score = -alphaBeta(newDepth, -alpha - 1, -alpha, ply + 1, useLMR);
-             
-             // If LMR failed or Null Window failed (score > alpha), re-search full window
-             if (score > alpha && score < beta) {
-                 score = -alphaBeta(depth - 1, -beta, -alpha, ply + 1, useLMR);
-             } else if (score > alpha && newDepth < depth - 1) {
-                 // If LMR failed but we haven't done full window
-                 score = -alphaBeta(depth - 1, -alpha - 1, -alpha, ply + 1, useLMR);
-                 if (score > alpha && score < beta) {
-                     score = -alphaBeta(depth - 1, -beta, -alpha, ply + 1, useLMR);
-                 }
-             }
-        }
-
-        unmakeMove(m, undo);
-
-        if (score > bestScore) {
-            bestScore = score;
-            bestMove = m;
-        }
-
-        if (score > alpha) {
-            alpha = score;
-            ttFlag = 0; // Exact
-            if(!m.cap) {
-                // Update Killer
-                if (ply < MAX_PLY) {
-                    if (killerMoves[ply][0] && (killerMoves[ply][0].f !== m.f || killerMoves[ply][0].t !== m.t)) {
-                        killerMoves[ply][1] = killerMoves[ply][0];
-                    }
-                    killerMoves[ply][0] = m;
-                }
-                // Update History
-                historyTable[m.f * 64 + m.t] += depth * depth;
+            let reduction = 0;
+            if (depth >= 3 && moveCount > 4 && !getCaptured(m) && !inCheck) reduction = 1;
+            
+            score = -alphabeta(depth - 1 - reduction, -alpha - 1, -alpha, ply + 1);
+            if(score > alpha && score < beta) {
+                 score = -alphabeta(depth - 1, -beta, -alpha, ply + 1);
             }
         }
-
-        if (alpha >= beta) {
-            ttFlag = 2; // Beta
-            if(!m.cap) historyTable[m.f * 64 + m.t] += depth * depth;
-            break;
+        unmakeMove(m, state);
+        
+        if(score > bestScore) {
+            bestScore = score;
+            bestMoveLocal = m;
+            if(score > alpha) {
+                alpha = score;
+                if (!getCaptured(m)) {
+                     history[getFrom(m) * 64 + getTo(m)] += depth * depth;
+                     if (ply < MAX_PLY) {
+                         if (killerMoves[ply * 2] !== m) {
+                             killerMoves[ply * 2 + 1] = killerMoves[ply * 2];
+                             killerMoves[ply * 2] = m;
+                         }
+                     }
+                }
+            }
         }
+        if(alpha >= beta) break; 
     }
-
-    if (legalMovesCount === 0) {
-        if (isCheck) return -50000 + ply; // Mate score adjusted by ply
-        else return 0; 
-    }
-
-    // MEMORY GOVERNOR: prevent Map size exceeded error
-    if (tt.size >= TT_SIZE_LIMIT) {
-        tt.clear(); // Drastic but effective for browser context safety
-    }
-    tt.set(currentHash, { depth, score: bestScore, flag: ttFlag, bestMove });
-
+    
+    if(moveCount === 0) return inCheck ? -MATE_SCORE + ply : 0;
     return bestScore;
 }
 
-function formatMove(m) {
-    if (!m) return null;
+function toUIMove(m) {
+    if(!m) return null;
     return {
-        from: m.f,
-        to: m.t,
-        piece: m.p,
-        captured: m.cap,
-        promotion: m.prom,
-        flags: {
-            isCastle: m.flag === 'c',
-            isEnPassant: m.flag === 'ep',
-            isPawnDouble: m.flag === 'pd'
-        }
+        from: getFrom(m),
+        to: getTo(m),
+        promotion: getProm(m) === TYPE_QUEEN ? 'q' : getProm(m) === TYPE_KNIGHT ? 'n' : undefined,
+        flags: { isCastle: !!(m & FLAG_CASTLE), isEnPassant: !!(m & FLAG_EP) }
     };
 }
 
 self.onmessage = function(e) {
-    const { fen, depth, timeLimit: limit, branchingFactor, useDynamicBranching, requestId } = e.data;
-    
-    let adjustedDepth = depth;
-    let d = 0;
-
-    // FAULT TOLERANCE WRAPPER
+    const { fen, depth, timeLimit, requestId } = e.data;
     try {
-        parseState(fen);
-        nodesSearched = 0;
-        startTime = Date.now();
-        timeLimit = limit || 3000;
+        parseFen(fen);
+        nodes = 0;
+        stopTime = Date.now() + timeLimit;
+        lastReportTime = Date.now();
+        currentRequestId = requestId;
+        bestMoveGlobal = 0;
+        bestScoreGlobal = 0;
         
-        // ... (Endgame depth logic same) ...
-        if (isEndgame()) adjustedDepth += 2;
+        killerMoves.fill(0);
+        history.fill(0);
         
-        log(\`Starting search: Depth \${adjustedDepth}, Time: \${(timeLimit/1000).toFixed(1)}s\`);
-
-        let bestMoveGlobal = null;
-        let scoreGlobal = 0;
-        // Keep track of the best move from the *previous* fully completed depth
-        // to ensure we always have something valid to return on timeout.
-        let completedDepthBestMove = null;
-
-        for (d = 1; d <= adjustedDepth; d++) {
-            
-            // Re-check time before starting new depth
-            if (Date.now() - startTime > timeLimit) {
-                 throw new Error("Timeout");
-            }
-
-            let moves = generateMoves(false);
-            const ttEntry = tt.get(currentHash);
-            const bestCand = ttEntry ? ttEntry.bestMove : null;
-            // Root uses ply 0 for sorting
-            sortMoves(moves, bestCand, 0);
-            
-            let alpha = -Infinity;
-            let beta = Infinity;
-            
-            if (d > 4) {
-               alpha = scoreGlobal - 50;
-               beta = scoreGlobal + 50;
-            }
-
-            // Loop moves at Root
-            let bestMoveLocal = null;
-            let bestScoreLocal = -Infinity;
-            
-            for (const m of moves) {
-                // Time check inside root moves to be responsive
-                if (Date.now() - startTime > timeLimit) {
-                     // Save what we have locally before throwing
-                     bestMoveGlobal = bestMoveLocal || bestMoveGlobal;
-                     throw new Error("Timeout");
-                }
-                
-                const undo = makeMove(m);
-                const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
-                if (isAttacked(kIdx, internalTurn)) {
-                    unmakeMove(m, undo);
-                    continue;
-                }
-                
-                // Root search is ply 0, next is ply 1
-                const score = -alphaBeta(d - 1, -beta, -alpha, 1, useDynamicBranching);
-                unmakeMove(m, undo);
-                
-                if (score > bestScoreLocal) {
-                    bestScoreLocal = score;
-                    bestMoveLocal = m;
-                    if (score > alpha) alpha = score;
-                    
-                    // UPDATE: Immediately report improved best move!
-                    self.postMessage({ 
-                        type: 'progress', 
-                        depth: d, 
-                        nodes: nodesSearched, 
-                        bestMove: formatMove(bestMoveLocal), 
-                        score: bestScoreLocal,
-                        requestId
-                    });
-                } else {
-                     // Still report progress even if not best move
-                      self.postMessage({ 
-                        type: 'progress', 
-                        depth: d, 
-                        nodes: nodesSearched, 
-                        bestMove: formatMove(bestMoveLocal || bestMoveGlobal), 
-                        score: bestScoreLocal,
-                        requestId
-                    });
-                }
-            }
-            
-            // Aspiration Window Logic
-            if (d > 4 && (bestScoreLocal <= alpha || bestScoreLocal >= beta)) {
-                 bestMoveGlobal = bestMoveLocal || bestMoveGlobal; 
-                 scoreGlobal = bestScoreLocal;
-            } else {
-                bestMoveGlobal = bestMoveLocal || bestMoveGlobal;
-                scoreGlobal = bestScoreLocal;
-            }
-            
-            // Mark this depth as completed
-            completedDepthBestMove = bestMoveGlobal;
-        }
-
-        self.postMessage({
-            type: 'done',
-            bestMove: formatMove(bestMoveGlobal),
-            score: scoreGlobal,
-            nodes: nodesSearched,
-            requestId
-        });
-
-    } catch (err) {
-        let recoveryMove = null;
+        log(\`[ENGINE] Tactician Mode. Depth: \${depth}\`);
         
-        // 1. Try to get move from the current partial depth if it found something better
-        // (bestMoveGlobal variable is updated inside the loop logic above now)
-        try {
-           const ttEntry = tt.get(currentHash);
-           if (ttEntry && ttEntry.bestMove) {
-               recoveryMove = formatMove(ttEntry.bestMove);
-           }
-        } catch(e) {}
-
-        // 2. If no TT move (rare), use the best move from the loop variable
-        // (This variable 'bestMoveGlobal' might be from the *current* interrupted depth 
-        // OR the *previous* completed depth depending on where we crashed)
-        // Accessing variables from outer scope:
-        // We can't easily access 'bestMoveGlobal' inside catch if it's block-scoped in try...
-        // Actually, let is block scoped. 
-        // FIX: The vars 'bestMoveGlobal', 'completedDepthBestMove' are defined inside 'try'. 
-        // We should move them up or accept that we only have TT or recalculate.
-        // HOWEVER, in JS, we can just rely on the TT which is updated *every time* a node improves alpha.
-        // So tt.get(currentHash) is the most reliable source for "Best Move Found So Far".
-        
-        // Improvement: Detailed Logging
-        const progress = adjustedDepth > 0 ? Math.round((d / adjustedDepth) * 100) : 0;
-        
-        if (err.message === "Timeout") {
-            log(\`[TIMEOUT] Reached limit (\${timeLimit}ms) at Depth \${d}/\${adjustedDepth} (\${progress}%). Nodes: \${nodesSearched}.\`);
-        } else {
-            log(\`WORKER ERROR (Recovered): \${err.message}\`);
-        }
-        
-        // Consistency Check: If recoveryMove is null, we must generate a random legal move to avoid hanging
-        if (!recoveryMove) {
-            log("[WARNING] No best move found in TT. Picking first legal move.");
+        for(let d=1; d<=depth; d++) {
+            activeDepth = d;
             try {
                 const moves = generateMoves(false);
-                // Filter legal... expensive but necessary fallback
+                orderMoves(moves, bestMoveGlobal, 0); 
+                
+                let alpha = -30000, beta = 30000;
+                let bestScore = -30000;
+                let bestMoveLocal = 0;
+                
                 for(let m of moves) {
-                    const undo = makeMove(m);
-                    const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
-                    const safe = !isAttacked(kIdx, internalTurn);
-                    unmakeMove(m, undo);
-                    if(safe) {
-                        recoveryMove = formatMove(m);
-                        break;
+                    const state = makeMove(m);
+                    
+                    const us = turn === COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE;
+                    const kSq = board.findIndex((x) => (x & us) && (x & 7) === TYPE_KING);
+                    if(isAttacked(kSq, turn)) {
+                        unmakeMove(m, state);
+                        continue;
+                    }
+                    
+                    const score = -alphabeta(d-1, -beta, -alpha, 1);
+                    unmakeMove(m, state);
+                    
+                    if(score > bestScore) {
+                        bestScore = score;
+                        bestMoveLocal = m;
+                        if(score > alpha) alpha = score;
+                        
+                        self.postMessage({
+                             type: 'progress',
+                             depth: d,
+                             score: bestScore,
+                             nodes: nodes,
+                             bestMove: toUIMove(bestMoveLocal),
+                             requestId
+                        });
                     }
                 }
-            } catch(e) { log("Critical Failure: " + e.message); }
+                
+                if(Date.now() > stopTime) throw "Timeout";
+                if(bestMoveLocal !== 0) {
+                    bestMoveGlobal = bestMoveLocal;
+                    bestScoreGlobal = bestScore;
+                }
+                if(bestScore > 28000 || bestScore < -28000) break;
+                
+            } catch(timeout) {
+                if (timeout === "Timeout") log(\`[TIMEOUT] Depth \${d}\`);
+                break;
+            }
         }
-
-        self.postMessage({
-            type: 'done',
-            bestMove: recoveryMove, 
-            score: 0, // Score is unreliable on timeout/crash
-            nodes: nodesSearched,
-            requestId
-        });
+        
+        self.postMessage({ type: 'done', bestMove: toUIMove(bestMoveGlobal), score: bestScoreGlobal, nodes: nodes, requestId });
+    } catch(err) {
+        log("ERROR: " + err.message);
+        self.postMessage({ type: 'done', bestMove: toUIMove(bestMoveGlobal), score: bestScoreGlobal, nodes: nodes, requestId });
     }
-};
+}
 `;

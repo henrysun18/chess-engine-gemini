@@ -14,14 +14,12 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
   const lastTime = useRef(Date.now());
   const logsRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logs
   useEffect(() => {
     if (logsRef.current) {
         logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
   }, [result.logs]);
 
-  // Calculate NPS (Nodes Per Second) for active feedback
   useEffect(() => {
     if (result.isThinking) {
       const interval = setInterval(() => {
@@ -41,17 +39,43 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
     }
   }, [result.isThinking, result.nodesSearched]);
 
-  // Normalize score for display (Standard Convention: Positive = White winning)
+  // Score Logic
+  // Engine returns score from Side-To-Move perspective.
+  // We want White-Relative score.
+  // If Turn=White, Score=X -> White Rel = X
+  // If Turn=Black, Score=X -> White Rel = -X
   let whiteRelativeScore = result.evaluation;
   if (turn === 'b') {
       whiteRelativeScore = -result.evaluation;
   }
   
-  const scoreUnit = whiteRelativeScore / 100; // Convert centipawns to pawns
-  const scoreDisplay = scoreUnit > 0 ? `+${scoreUnit.toFixed(2)}` : scoreUnit.toFixed(2);
+  let scoreDisplay = "";
+  const MATE_THRESHOLD = 20000;
+  const isMate = Math.abs(result.evaluation) > MATE_THRESHOLD;
+  
+  if (isMate) {
+      // Mate Score is 29000 - moves.
+      // If White winning mate: +29000.
+      // If Black winning mate (White Rel): -29000.
+      const movesToMate = Math.ceil((29000 - Math.abs(whiteRelativeScore)) / 2);
+      const isWhiteWinning = whiteRelativeScore > 0;
+      scoreDisplay = `M# ${isWhiteWinning ? '+' : '-'}${movesToMate}`;
+  } else {
+      const scoreUnit = whiteRelativeScore / 100; 
+      scoreDisplay = scoreUnit > 0 ? `+${scoreUnit.toFixed(2)}` : scoreUnit.toFixed(2);
+  }
   
   const progressPercent = Math.min(100, (result.currentDepth / configDepth) * 100);
-  const evalPercent = Math.min(100, Math.max(0, 50 + (scoreUnit * 10))); 
+  
+  // Eval Bar Logic
+  let evalPercent = 50;
+  if (isMate) {
+      evalPercent = whiteRelativeScore > 0 ? 100 : 0;
+  } else {
+      const capped = Math.max(-1000, Math.min(1000, whiteRelativeScore));
+      // -1000 -> 0%, 0 -> 50%, +1000 -> 100%
+      evalPercent = 50 + (capped / 20);
+  }
 
   return (
     <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 w-full max-w-[600px] mt-2 shadow-lg">
@@ -76,7 +100,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
       <div className="grid grid-cols-2 gap-2 text-sm mb-2">
         <div className="bg-slate-700/50 p-1.5 rounded">
            <p className="text-[10px] text-slate-500 uppercase font-semibold">Evaluation (White)</p>
-           <p className={`font-mono text-lg leading-tight font-bold ${scoreUnit > 0 ? 'text-green-400' : scoreUnit < 0 ? 'text-red-400' : 'text-slate-200'}`}>
+           <p className={`font-mono text-lg leading-tight font-bold ${whiteRelativeScore > 0 ? 'text-green-400' : whiteRelativeScore < 0 ? 'text-red-400' : 'text-slate-200'}`}>
              {scoreDisplay}
            </p>
         </div>
@@ -88,7 +112,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
         </div>
       </div>
 
-      {/* Depth Progress Bar */}
       <div className="space-y-0.5 mb-2">
         <div className="flex justify-between text-[10px] text-slate-400">
           <span>Depth Progress</span>
@@ -114,7 +137,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
          </div>
       )}
 
-      {/* Debug Logs */}
       <div className="mt-2 pt-1 border-t border-slate-700">
           <p className="text-[10px] text-slate-500 mb-0.5 font-bold">WORKER LOGS</p>
           <div ref={logsRef} className="h-16 bg-black/50 rounded p-1.5 overflow-y-auto font-mono text-[9px] text-slate-400 leading-tight">
