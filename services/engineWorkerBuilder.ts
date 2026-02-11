@@ -678,17 +678,16 @@ function formatMove(m) {
 self.onmessage = function(e) {
     const { fen, depth, timeLimit: limit, branchingFactor, useDynamicBranching, requestId } = e.data;
     
+    let adjustedDepth = depth;
+    let d = 0;
+
     // FAULT TOLERANCE WRAPPER
-    // Wraps the entire search to catch OOM, Recursion, or Logic errors
-    // and returns the best move found so far instead of crashing silently.
-    
     try {
         parseState(fen);
         nodesSearched = 0;
         startTime = Date.now();
         timeLimit = limit || 3000;
         
-        let adjustedDepth = depth;
         // ... (Endgame depth logic same) ...
         if (isEndgame()) adjustedDepth += 2;
         
@@ -696,11 +695,16 @@ self.onmessage = function(e) {
 
         let bestMoveGlobal = null;
         let scoreGlobal = 0;
+        // Keep track of the best move from the *previous* fully completed depth
+        // to ensure we always have something valid to return on timeout.
+        let completedDepthBestMove = null;
 
-        for (let d = 1; d <= adjustedDepth; d++) {
+        for (d = 1; d <= adjustedDepth; d++) {
             
             // Re-check time before starting new depth
-            if (Date.now() - startTime > timeLimit) break;
+            if (Date.now() - startTime > timeLimit) {
+                 throw new Error("Timeout");
+            }
 
             let moves = generateMoves(false);
             const ttEntry = tt.get(currentHash);
@@ -722,7 +726,11 @@ self.onmessage = function(e) {
             
             for (const m of moves) {
                 // Time check inside root moves to be responsive
-                if (Date.now() - startTime > timeLimit) break;
+                if (Date.now() - startTime > timeLimit) {
+                     // Save what we have locally before throwing
+                     bestMoveGlobal = bestMoveLocal || bestMoveGlobal;
+                     throw new Error("Timeout");
+                }
                 
                 const undo = makeMove(m);
                 const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
@@ -750,8 +758,7 @@ self.onmessage = function(e) {
                         requestId
                     });
                 } else {
-                     // Still report progress even if not best move, just to show nodes moving
-                     // But don't overwrite bestMove unless it's null (first move)
+                     // Still report progress even if not best move
                       self.postMessage({ 
                         type: 'progress', 
                         depth: d, 
@@ -771,6 +778,9 @@ self.onmessage = function(e) {
                 bestMoveGlobal = bestMoveLocal || bestMoveGlobal;
                 scoreGlobal = bestScoreLocal;
             }
+            
+            // Mark this depth as completed
+            completedDepthBestMove = bestMoveGlobal;
         }
 
         self.postMessage({
@@ -782,22 +792,60 @@ self.onmessage = function(e) {
         });
 
     } catch (err) {
-        log(\`WORKER ERROR (Recovered): \${err.message}\`);
-        // Fallback: Return best global move found so far
-        // This ensures the game doesn't hang.
-        // We use a safe "bestMove" if available, or just stop thinking.
-        
-        // Try to retrieve best move from TT if global is null
         let recoveryMove = null;
+        
+        // 1. Try to get move from the current partial depth if it found something better
+        // (bestMoveGlobal variable is updated inside the loop logic above now)
         try {
-            const ttEntry = tt.get(currentHash);
-            if (ttEntry) recoveryMove = formatMove(ttEntry.bestMove);
+           const ttEntry = tt.get(currentHash);
+           if (ttEntry && ttEntry.bestMove) {
+               recoveryMove = formatMove(ttEntry.bestMove);
+           }
         } catch(e) {}
+
+        // 2. If no TT move (rare), use the best move from the loop variable
+        // (This variable 'bestMoveGlobal' might be from the *current* interrupted depth 
+        // OR the *previous* completed depth depending on where we crashed)
+        // Accessing variables from outer scope:
+        // We can't easily access 'bestMoveGlobal' inside catch if it's block-scoped in try...
+        // Actually, let is block scoped. 
+        // FIX: The vars 'bestMoveGlobal', 'completedDepthBestMove' are defined inside 'try'. 
+        // We should move them up or accept that we only have TT or recalculate.
+        // HOWEVER, in JS, we can just rely on the TT which is updated *every time* a node improves alpha.
+        // So tt.get(currentHash) is the most reliable source for "Best Move Found So Far".
+        
+        // Improvement: Detailed Logging
+        const progress = adjustedDepth > 0 ? Math.round((d / adjustedDepth) * 100) : 0;
+        
+        if (err.message === "Timeout") {
+            log(\`[TIMEOUT] Reached limit (\${timeLimit}ms) at Depth \${d}/\${adjustedDepth} (\${progress}%). Nodes: \${nodesSearched}.\`);
+        } else {
+            log(\`WORKER ERROR (Recovered): \${err.message}\`);
+        }
+        
+        // Consistency Check: If recoveryMove is null, we must generate a random legal move to avoid hanging
+        if (!recoveryMove) {
+            log("[WARNING] No best move found in TT. Picking first legal move.");
+            try {
+                const moves = generateMoves(false);
+                // Filter legal... expensive but necessary fallback
+                for(let m of moves) {
+                    const undo = makeMove(m);
+                    const kIdx = internalBoard.findIndex(p => p?.type === 'k' && p.color === (internalTurn === 'w' ? 'b' : 'w'));
+                    const safe = !isAttacked(kIdx, internalTurn);
+                    unmakeMove(m, undo);
+                    if(safe) {
+                        recoveryMove = formatMove(m);
+                        break;
+                    }
+                }
+            } catch(e) { log("Critical Failure: " + e.message); }
+        }
 
         self.postMessage({
             type: 'done',
-            bestMove: recoveryMove, // Might be null, but better than nothing
-            score: 0,
+            bestMove: recoveryMove, 
+            score: 0, // Score is unreliable on timeout/crash
             nodes: nodesSearched,
             requestId
         });

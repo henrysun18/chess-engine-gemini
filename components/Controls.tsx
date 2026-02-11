@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { EngineConfig } from '../types';
 
 interface ControlsProps {
@@ -20,6 +20,27 @@ export const Controls: React.FC<ControlsProps> = ({
   onReset, onUndo, onImportFen, onExportFen, onImportPgn, onExportPgn,
   config, setConfig, engineEnabled, setEngineEnabled, gameState 
 }) => {
+  // Local state for sliders to prevent rapid-fire updates to the engine
+  const [localDepth, setLocalDepth] = useState(config.depth);
+  const [localTime, setLocalTime] = useState(config.timeLimit);
+  const [localBranching, setLocalBranching] = useState(config.branchingFactor);
+
+  // Sync local state if parent config changes externally (e.g. reset)
+  useEffect(() => {
+    setLocalDepth(config.depth);
+    setLocalTime(config.timeLimit);
+    setLocalBranching(config.branchingFactor);
+  }, [config]);
+
+  const commitChanges = () => {
+    setConfig({
+      ...config,
+      depth: localDepth,
+      timeLimit: localTime,
+      branchingFactor: localBranching
+    });
+  };
+
   return (
     <div className="flex flex-col gap-2 p-3 bg-slate-800 rounded-lg border border-slate-700 w-full max-w-[600px]">
       <div className="flex justify-between items-center border-b border-slate-700 pb-1 mb-1">
@@ -54,12 +75,14 @@ export const Controls: React.FC<ControlsProps> = ({
             <div className="space-y-0.5">
               <div className="flex justify-between">
                 <label className="text-[10px] text-slate-400">Max Depth</label>
-                <span className="text-[10px] font-mono text-amber-400">{config.depth}</span>
+                <span className="text-[10px] font-mono text-amber-400">{localDepth}</span>
               </div>
               <input 
                 type="range" min="1" max="12" step="1" 
-                value={config.depth} 
-                onChange={(e) => setConfig({...config, depth: parseInt(e.target.value)})}
+                value={localDepth} 
+                onChange={(e) => setLocalDepth(parseInt(e.target.value))}
+                onMouseUp={commitChanges}
+                onTouchEnd={commitChanges}
                 className="w-full accent-amber-500 bg-slate-700 h-1.5 rounded-lg appearance-none cursor-pointer"
               />
             </div>
@@ -67,12 +90,14 @@ export const Controls: React.FC<ControlsProps> = ({
             <div className="space-y-0.5">
               <div className="flex justify-between">
                 <label className="text-[10px] text-slate-400">Time Limit</label>
-                <span className="text-[10px] font-mono text-amber-400">{(config.timeLimit / 1000).toFixed(1)}s</span>
+                <span className="text-[10px] font-mono text-amber-400">{(localTime / 1000).toFixed(1)}s</span>
               </div>
               <input 
-                type="range" min="500" max="15000" step="500" 
-                value={config.timeLimit} 
-                onChange={(e) => setConfig({...config, timeLimit: parseInt(e.target.value)})}
+                type="range" min="500" max="120000" step="500" 
+                value={localTime} 
+                onChange={(e) => setLocalTime(parseInt(e.target.value))}
+                onMouseUp={commitChanges}
+                onTouchEnd={commitChanges}
                 className="w-full accent-amber-500 bg-slate-700 h-1.5 rounded-lg appearance-none cursor-pointer"
               />
             </div>
@@ -91,12 +116,14 @@ export const Controls: React.FC<ControlsProps> = ({
                 <div className="space-y-0.5 col-span-2 animate-in fade-in">
                   <div className="flex justify-between">
                      <label className="text-[10px] text-slate-400">Branching Factor</label>
-                     <span className="text-[10px] font-mono text-amber-400">{config.branchingFactor}</span>
+                     <span className="text-[10px] font-mono text-amber-400">{localBranching}</span>
                   </div>
                   <input 
                     type="range" min="2" max="50" step="1" 
-                    value={config.branchingFactor} 
-                    onChange={(e) => setConfig({...config, branchingFactor: parseInt(e.target.value)})}
+                    value={localBranching} 
+                    onChange={(e) => setLocalBranching(parseInt(e.target.value))}
+                    onMouseUp={commitChanges}
+                    onTouchEnd={commitChanges}
                     className="w-full accent-amber-500 bg-slate-700 h-1.5 rounded-lg appearance-none cursor-pointer"
                   />
                 </div>
