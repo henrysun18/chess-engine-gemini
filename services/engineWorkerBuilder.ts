@@ -1,7 +1,7 @@
 
 export const workerCode = `
 // ============================================================================
-// GRANDMASTER LOGIC: HIGH-PERFORMANCE BITWISE ENGINE (v3.5 - Timer Logs)
+// GRANDMASTER LOGIC: HIGH-PERFORMANCE BITWISE ENGINE (v4.0 - TT & Cache)
 // ============================================================================
 
 // --- CONSTANTS ---
@@ -37,6 +37,12 @@ const SHIFT_PROM = 18;
 const FLAG_CASTLE = 0x200000;
 const FLAG_EP = 0x400000;
 const FLAG_DOUBLE = 0x800000;
+
+// TT Constants
+const TT_SIZE = 1 << 20; // ~1 million entries (approx 20MB * arrays)
+const TT_FLAG_EXACT = 0;
+const TT_FLAG_LOWER = 1; // Alpha
+const TT_FLAG_UPPER = 2; // Beta
 
 // Tables (PeSTO)
 const MG_PAWN = [0,0,0,0,0,0,0,0,98,134,61,95,68,126,34,-11,-6,7,26,31,65,56,25,-20,-14,13,6,21,23,12,17,-23,-27,-2,-5,12,17,6,10,-25,-26,-4,-4,-10,3,3,33,-12,-35,-1,-20,-23,-15,24,38,-22,0,0,0,0,0,0,0,0];
@@ -89,6 +95,14 @@ let bestScoreGlobal = 0;
 let currentRequestId = 0;
 let activeDepth = 0;
 
+// Transposition Table
+const ttHash = new Int32Array(TT_SIZE);
+const ttDepth = new Int8Array(TT_SIZE);
+const ttFlag = new Int8Array(TT_SIZE);
+const ttScore = new Int16Array(TT_SIZE);
+const ttMove = new Int32Array(TT_SIZE);
+
+// Log Helper
 function log(msg) { self.postMessage({ type: 'log', message: msg, requestId: currentRequestId }); }
 
 // Helpers
@@ -141,6 +155,7 @@ function parseFen(fen) {
     positionHistory[historyPly++] = currentHash;
 }
 
+// ... Evaluate, getSEE, isAttacked unchanged ...
 function evaluate() {
     let mg = 0, eg = 0, gamePhase = 0;
     for(let i=0; i<64; i++) {
@@ -248,7 +263,10 @@ function generateMoves(capsOnly) {
             const t = i + dir;
             if (!capsOnly && board[t] === 0) {
                 if ((t >> 3) === promR) {
+                     // Updated: Add R, B, N, Q
                      moves.push(createMove(i, t, type, 0, TYPE_QUEEN, 0));
+                     moves.push(createMove(i, t, type, 0, TYPE_ROOK, 0));
+                     moves.push(createMove(i, t, type, 0, TYPE_BISHOP, 0));
                      moves.push(createMove(i, t, type, 0, TYPE_KNIGHT, 0));
                 } else {
                     moves.push(createMove(i, t, type, 0, 0, 0));
@@ -265,6 +283,9 @@ function generateMoves(capsOnly) {
                 if(target && (target & them)) {
                     if ((ct >> 3) === promR) {
                          moves.push(createMove(i, ct, type, target&7, TYPE_QUEEN, 0));
+                         moves.push(createMove(i, ct, type, target&7, TYPE_ROOK, 0));
+                         moves.push(createMove(i, ct, type, target&7, TYPE_BISHOP, 0));
+                         moves.push(createMove(i, ct, type, target&7, TYPE_KNIGHT, 0));
                     } else {
                         moves.push(createMove(i, ct, type, target&7, 0, 0));
                     }
@@ -427,15 +448,44 @@ function orderMoves(moves, bestMove, ply) {
 }
 
 function isRepetition() {
-    // Check backwards from current position
-    // Simple 3-fold rule: if position appears 3 times total (2 times previously).
-    // In search, if we encounter the current hash once in the path, it's a cycle (1 repetition).
-    // Since we only track search path here (not full game history), any match is a cycle.
-    // Return draw for cycle.
     for(let i = historyPly - 2; i >= 0; i--) {
         if(positionHistory[i] === currentHash) return true;
     }
     return false;
+}
+
+// Store in TT
+function storeTT(depth, score, flag, bestMove) {
+    const idx = (currentHash >>> 0) % TT_SIZE;
+    ttHash[idx] = currentHash;
+    ttDepth[idx] = depth;
+    ttScore[idx] = score;
+    ttFlag[idx] = flag;
+    if (bestMove) ttMove[idx] = bestMove;
+}
+
+// Read from TT
+function probeTT(depth, alpha, beta) {
+    const idx = (currentHash >>> 0) % TT_SIZE;
+    if (ttHash[idx] === currentHash) {
+        if (ttDepth[idx] >= depth) {
+             const score = ttScore[idx];
+             if (ttFlag[idx] === TT_FLAG_EXACT) return { score };
+             if (ttFlag[idx] === TT_FLAG_LOWER && score <= alpha) return { score: alpha }; // Fail low (beta cut prev) ? No, Lower means Upper Bound (Beta). wait.
+             // Standard:
+             // Flag Lower (Alpha) means we know score <= X. If X <= alpha, we fail low.
+             // Flag Upper (Beta) means we know score >= X. If X >= beta, we fail high.
+             // Let's stick to simple:
+             // EXACT: return score.
+             // LOWER (Alpha): score <= stored. If stored <= alpha, return alpha.
+             // UPPER (Beta): score >= stored. If stored >= beta, return beta.
+             
+             if (ttFlag[idx] === TT_FLAG_UPPER && score >= beta) return { score: beta };
+             if (ttFlag[idx] === TT_FLAG_LOWER && score <= alpha) return { score: alpha };
+        }
+        return { move: ttMove[idx] };
+    }
+    return null;
 }
 
 function qsearch(alpha, beta) {
@@ -498,7 +548,13 @@ function alphabeta(depth, alpha, beta, ply) {
     }
     nodes++;
     
-    if (ply > 0 && isRepetition()) return 0; // Draw by repetition/cycle
+    if (ply > 0 && isRepetition()) return 0;
+    
+    // TT Probe
+    const ttEntry = probeTT(depth, alpha, beta);
+    if (ttEntry && ttEntry.score !== undefined && ply > 0) return ttEntry.score;
+    let ttMoveHint = ttEntry ? ttEntry.move : 0;
+
     if (ply >= MAX_PLY) return evaluate();
 
     const mateScore = MATE_SCORE - ply;
@@ -514,11 +570,12 @@ function alphabeta(depth, alpha, beta, ply) {
     if(depth <= 0) return qsearch(alpha, beta);
     
     const moves = generateMoves(false);
-    orderMoves(moves, null, ply);
+    orderMoves(moves, ttMoveHint, ply);
     
     let moveCount = 0;
     let bestScore = -30000;
     let bestMoveLocal = 0;
+    let flag = TT_FLAG_LOWER; // Alpha
     
     for(let m of moves) {
         const state = makeMove(m);
@@ -550,6 +607,7 @@ function alphabeta(depth, alpha, beta, ply) {
             bestMoveLocal = m;
             if(score > alpha) {
                 alpha = score;
+                flag = TT_FLAG_EXACT;
                 if (!getCaptured(m)) {
                      history[getFrom(m) * 64 + getTo(m)] += depth * depth;
                      if (ply < MAX_PLY) {
@@ -561,19 +619,34 @@ function alphabeta(depth, alpha, beta, ply) {
                 }
             }
         }
-        if(alpha >= beta) break; 
+        if(alpha >= beta) {
+            flag = TT_FLAG_UPPER; // Beta
+            break; 
+        }
     }
     
     if(moveCount === 0) return inCheck ? -MATE_SCORE + ply : 0;
+    
+    // Store TT
+    storeTT(depth, bestScore, flag, bestMoveLocal);
+    
     return bestScore;
 }
 
 function toUIMove(m) {
     if(!m) return null;
+    let pChar = undefined;
+    const prom = getProm(m);
+    if(prom) {
+        if(prom === TYPE_QUEEN) pChar = 'q';
+        else if(prom === TYPE_ROOK) pChar = 'r';
+        else if(prom === TYPE_BISHOP) pChar = 'b';
+        else if(prom === TYPE_KNIGHT) pChar = 'n';
+    }
     return {
         from: getFrom(m),
         to: getTo(m),
-        promotion: getProm(m) === TYPE_QUEEN ? 'q' : getProm(m) === TYPE_KNIGHT ? 'n' : undefined,
+        promotion: pChar,
         flags: { isCastle: !!(m & FLAG_CASTLE), isEnPassant: !!(m & FLAG_EP) }
     };
 }
@@ -599,6 +672,9 @@ self.onmessage = function(e) {
         for(let d=1; d<=depth; d++) {
             activeDepth = d;
             try {
+                // If checking the exact same position as last search, we have TT results!
+                // But we still run iterative deepening to output stats and refine info.
+                
                 const moves = generateMoves(false);
                 orderMoves(moves, bestMoveGlobal, 0); 
                 

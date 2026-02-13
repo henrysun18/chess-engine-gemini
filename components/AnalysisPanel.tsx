@@ -1,14 +1,16 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { EngineResult, PieceColor } from '../types';
+import { EngineResult, PieceColor, GameState } from '../types';
+import { moveToSan, getLegalMoves, makeMove } from '../utils/chessRules';
 
 interface AnalysisPanelProps {
   result: EngineResult;
   turn: PieceColor;
   configDepth: number;
+  gameState: GameState;
 }
 
-export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, configDepth }) => {
+export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, configDepth, gameState }) => {
   const [nps, setNps] = useState(0);
   const prevNodes = useRef(0);
   const lastTime = useRef(Date.now());
@@ -40,10 +42,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
   }, [result.isThinking, result.nodesSearched]);
 
   // Score Logic
-  // Engine returns score from Side-To-Move perspective.
-  // We want White-Relative score.
-  // If Turn=White, Score=X -> White Rel = X
-  // If Turn=Black, Score=X -> White Rel = -X
   let whiteRelativeScore = result.evaluation;
   if (turn === 'b') {
       whiteRelativeScore = -result.evaluation;
@@ -54,9 +52,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
   const isMate = Math.abs(result.evaluation) > MATE_THRESHOLD;
   
   if (isMate) {
-      // Mate Score is 29000 - moves.
-      // If White winning mate: +29000.
-      // If Black winning mate (White Rel): -29000.
       const movesToMate = Math.ceil((29000 - Math.abs(whiteRelativeScore)) / 2);
       const isWhiteWinning = whiteRelativeScore > 0;
       scoreDisplay = `M# ${isWhiteWinning ? '+' : '-'}${movesToMate}`;
@@ -67,14 +62,39 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
   
   const progressPercent = Math.min(100, (result.currentDepth / configDepth) * 100);
   
-  // Eval Bar Logic
   let evalPercent = 50;
   if (isMate) {
       evalPercent = whiteRelativeScore > 0 ? 100 : 0;
   } else {
       const capped = Math.max(-1000, Math.min(1000, whiteRelativeScore));
-      // -1000 -> 0%, 0 -> 50%, +1000 -> 100%
       evalPercent = 50 + (capped / 20);
+  }
+
+  // Format Nodes
+  const formatNodes = (n: number) => {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+      return n.toString();
+  };
+
+  // Generate SAN for Best Move
+  let bestMoveSan = "";
+  if (result.bestMove) {
+      // Find the fully hydrated legal move corresponding to the engine's minimal move
+      const legalMoves = getLegalMoves(gameState);
+      const matchedMove = legalMoves.find(m => 
+          m.from === result.bestMove!.from && 
+          m.to === result.bestMove!.to && 
+          m.promotion === result.bestMove!.promotion
+      );
+      
+      if (matchedMove) {
+          const tempState = makeMove(gameState, matchedMove);
+          bestMoveSan = moveToSan(matchedMove, gameState, tempState);
+      } else {
+          // Fallback if not found (shouldn't happen)
+          bestMoveSan = `${String.fromCharCode(97 + (result.bestMove.from % 8))}${8 - Math.floor(result.bestMove.from / 8)} -> ...`;
+      }
   }
 
   return (
@@ -107,7 +127,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
         <div className="bg-slate-700/50 p-1.5 rounded">
            <p className="text-[10px] text-slate-500 uppercase font-semibold">Nodes Searched</p>
            <p className="font-mono text-slate-200 text-lg leading-tight">
-             {(result.nodesSearched / 1000).toFixed(1)}k
+             {formatNodes(result.nodesSearched)}
            </p>
         </div>
       </div>
@@ -125,14 +145,12 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
         </div>
       </div>
       
-      {!result.isThinking && result.bestMove && (
+      {!result.isThinking && bestMoveSan && (
          <div className="mt-2 pt-2 border-t border-slate-700">
            <div className="text-[10px] text-slate-500 uppercase font-semibold mb-0.5">Best Line Found</div>
-           <div className="text-emerald-400 font-mono text-base flex items-center gap-2">
-             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-             {String.fromCharCode(97 + (result.bestMove.from % 8))}{8 - Math.floor(result.bestMove.from / 8)} 
-             &nbsp;&rarr;&nbsp; 
-             {String.fromCharCode(97 + (result.bestMove.to % 8))}{8 - Math.floor(result.bestMove.to / 8)}
+           <div className="text-emerald-400 font-mono text-xl font-bold flex items-center gap-2">
+             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+             {bestMoveSan}
            </div>
          </div>
       )}

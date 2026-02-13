@@ -5,7 +5,7 @@ import { Controls } from './components/Controls';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { ImportExportModal } from './components/ImportExportModal';
 import { CapturedPieces } from './components/CapturedPieces';
-import { GameState, Move, EngineConfig, EngineResult } from './types';
+import { GameState, Move, EngineConfig, EngineResult, PieceType } from './types';
 import { parseFen, generateFen, getLegalMoves, makeMove, pgnToGameState, gameStateToPgn } from './utils/chessRules';
 import { fetchOpeningMove } from './utils/openingBook';
 import { INITIAL_FEN } from './constants';
@@ -17,6 +17,7 @@ function App() {
   const [selectedSquare, setSelectedSquare] = useState<number | null>(null);
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
   const [engineEnabled, setEngineEnabled] = useState(false);
+  const [pendingPromotion, setPendingPromotion] = useState<{ move: Move; from: number; to: number } | null>(null);
   
   // Engine State
   const [engineConfig, setEngineConfig] = useState<EngineConfig>({ 
@@ -37,72 +38,73 @@ function App() {
     value?: string;
   }>({ isOpen: false, type: 'fen', mode: 'import' });
 
-  // Worker ref is managed by the effect now
+  // Worker ref
   const workerRef = useRef<Worker | null>(null);
 
-  // --- Engine Lifecycle Management ---
+  // Initialize Worker Once
   useEffect(() => {
-    // 1. Terminate existing worker immediately when dependencies change
-    if (workerRef.current) {
-        workerRef.current.terminate();
-        workerRef.current = null;
-    }
+    if (!workerRef.current) {
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        workerRef.current = new Worker(url);
+        
+        workerRef.current.onmessage = (e) => {
+             const { type, bestMove, score, nodes, depth, message } = e.data;
+             if (type === 'log') {
+                setEngineResult(prev => ({ ...prev, logs: [...prev.logs, `[Worker] ${message}`].slice(-50) }));
+             } else if (type === 'progress') {
+                setEngineResult(prev => ({ ...prev, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: true, bestMove: bestMove }));
+             } else if (type === 'done') {
+                setEngineResult(prev => ({ ...prev, bestMove, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: false, pv: [] }));
+             }
+        };
 
-    // If engine is disabled or game over, stop here.
+        workerRef.current.onerror = (err) => {
+             console.error("Worker error:", err);
+             setEngineResult(prev => ({ ...prev, isThinking: false, logs: [...prev.logs, `[CRITICAL] Worker crashed: ${err.message}`] }));
+        };
+    }
+    
+    return () => {
+        // Cleanup on unmount only
+        workerRef.current?.terminate();
+        workerRef.current = null;
+    };
+  }, []);
+
+  // Run Analysis Logic (Triggered by state changes)
+  useEffect(() => {
+    // If engine disabled or game over, stop.
     if (!engineEnabled || gameState.isGameOver) {
         setEngineResult(prev => ({ ...prev, isThinking: false, bestMove: null }));
         return;
     }
 
-    let isCancelled = false;
-
-    // 2. Create new Worker for this specific move/config
-    const blob = new Blob([workerCode], { type: 'application/javascript' });
-    const url = URL.createObjectURL(blob);
-    const worker = new Worker(url);
-    workerRef.current = worker;
-
-    // 3. Setup message handler
-    worker.onmessage = (e) => {
-        if (isCancelled) return;
-        const { type, bestMove, score, nodes, depth, message } = e.data;
-
-        if (type === 'log') {
-            setEngineResult(prev => ({
-                ...prev,
-                logs: [...prev.logs, `[Worker] ${message}`].slice(-50)
-            }));
-        } else if (type === 'progress') {
-            setEngineResult(prev => ({ 
-                ...prev, 
-                evaluation: score, 
-                nodesSearched: nodes, 
-                currentDepth: depth,
-                isThinking: true, 
-                bestMove: bestMove 
-            }));
-        } else if (type === 'done') {
-            setEngineResult(prev => ({
-                ...prev,
-                bestMove, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: false, pv: []
-            }));
-        }
-    };
-
-    worker.onerror = (err) => {
-        console.error("Worker error:", err);
-        setEngineResult(prev => ({
-           ...prev,
-           isThinking: false,
-           logs: [...prev.logs, `[CRITICAL] Worker crashed: ${err.message}`]
-        }));
-    };
-
-    // 4. Run Analysis Logic
     const runAnalysis = async () => {
         const requestId = Date.now();
-        
-        // Reset UI for new think
+
+        // If worker is currently thinking, we must terminate it to stop the old search
+        // This is the only way to "interrupt" the synchronous JS loop in the worker.
+        // We accept the loss of TT cache in this specific race condition (user moves fast).
+        if (engineResult.isThinking && workerRef.current) {
+             workerRef.current.terminate();
+             // Recreate immediately
+             const blob = new Blob([workerCode], { type: 'application/javascript' });
+             const url = URL.createObjectURL(blob);
+             workerRef.current = new Worker(url);
+             // Reattach listeners
+             workerRef.current.onmessage = (e) => {
+                 const { type, bestMove, score, nodes, depth, message } = e.data;
+                 if (type === 'log') {
+                    setEngineResult(prev => ({ ...prev, logs: [...prev.logs, `[Worker] ${message}`].slice(-50) }));
+                 } else if (type === 'progress') {
+                    setEngineResult(prev => ({ ...prev, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: true, bestMove: bestMove }));
+                 } else if (type === 'done') {
+                    setEngineResult(prev => ({ ...prev, bestMove, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: false, pv: [] }));
+                 }
+             };
+        }
+
         setEngineResult(prev => ({ ...prev, isThinking: true, bestMove: null, currentDepth: 0, logs: [] }));
 
         // Check Opening Book
@@ -110,7 +112,8 @@ function App() {
             setEngineResult(prev => ({ ...prev, logs: ['Checking Lichess Masters Book...'] }));
             const bookMove = await fetchOpeningMove(gameState);
             
-            if (isCancelled) return;
+            // Check if we are still consistent (e.g. user didn't disable engine while waiting)
+            if (!engineEnabled) return;
 
             if (bookMove) {
                 setEngineResult(prev => ({
@@ -128,35 +131,25 @@ function App() {
             }
         }
 
-        if (isCancelled) return;
-
-        // Send to Engine
-        const fen = generateFen(gameState);
-        worker.postMessage({
-            fen,
-            depth: engineConfig.depth,
-            timeLimit: engineConfig.timeLimit,
-            branchingFactor: engineConfig.branchingFactor,
-            useDynamicBranching: engineConfig.useDynamicBranching,
-            requestId
-        });
+        if (workerRef.current) {
+            const fen = generateFen(gameState);
+            workerRef.current.postMessage({
+                fen,
+                depth: engineConfig.depth,
+                timeLimit: engineConfig.timeLimit,
+                requestId
+            });
+        }
     };
 
     runAnalysis();
-
-    // 5. Cleanup
-    return () => {
-        isCancelled = true;
-        worker.terminate();
-        URL.revokeObjectURL(url);
-        workerRef.current = null;
-    };
-  }, [gameState, engineEnabled, engineConfig]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState, engineEnabled, engineConfig]); // Re-run when these change
 
 
   // Handle Square Click
   const handleSquareClick = (index: number) => {
-    if (gameState.isGameOver) return;
+    if (gameState.isGameOver || pendingPromotion) return;
 
     if (selectedSquare === index) {
       setSelectedSquare(null);
@@ -166,7 +159,12 @@ function App() {
 
     const move = legalMoves.find(m => m.to === index);
     if (move && selectedSquare !== null) {
-      executeMove(move);
+      if (move.promotion) {
+          // Trigger promotion UI instead of executing
+          setPendingPromotion({ move, from: move.from, to: move.to });
+      } else {
+          executeMove(move);
+      }
       return;
     }
 
@@ -186,12 +184,18 @@ function App() {
     setGameState(newState);
     setSelectedSquare(null);
     setLegalMoves([]);
+    setPendingPromotion(null);
+  };
+
+  const handlePromotionSelection = (type: PieceType) => {
+      if (pendingPromotion) {
+          const move = { ...pendingPromotion.move, promotion: type };
+          executeMove(move);
+      }
   };
 
   const handleUndo = () => {
     if (gameState.history.length === 0) return;
-    
-    // Naive Replay Undo
     let tempState = parseFen(INITIAL_FEN);
     for (let i = 0; i < gameState.history.length - 1; i++) {
         tempState = makeMove(tempState, gameState.history[i]);
@@ -209,7 +213,6 @@ function App() {
   };
 
   // --- Import / Export Handlers ---
-
   const openModal = (type: 'fen' | 'pgn', mode: 'import' | 'export') => {
       let value = '';
       if (mode === 'export') {
@@ -232,15 +235,35 @@ function App() {
           setSelectedSquare(null);
       } catch (e) {
           alert(`Invalid ${modalState.type.toUpperCase()} string or move sequence.`);
-          console.error(e);
       }
   };
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center py-8 px-4 font-sans">
-      <div className="w-full max-w-[1600px] flex flex-col md:flex-row gap-8 items-start justify-center">
+      <div className="w-full max-w-[1600px] flex flex-col md:flex-row gap-8 items-start justify-center relative">
         
-        {/* Left Column: Board (Resizable) */}
+        {/* Promotion Overlay */}
+        {pendingPromotion && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm rounded-lg">
+                <div className="bg-slate-800 p-4 rounded-lg shadow-2xl border border-slate-600 flex gap-4 animate-in zoom-in">
+                    {(['q', 'r', 'b', 'n'] as PieceType[]).map(type => (
+                        <button 
+                           key={type}
+                           onClick={() => handlePromotionSelection(type)}
+                           className="w-16 h-16 bg-slate-700 hover:bg-slate-600 rounded flex items-center justify-center transition-colors border-2 border-transparent hover:border-amber-500"
+                        >
+                            <img 
+                                src={`https://upload.wikimedia.org/wikipedia/commons/${gameState.turn === 'w' ? '1/15/Chess_qlt45.svg'.replace('q', type) : '4/47/Chess_qdt45.svg'.replace('q', type)}`} 
+                                alt={type} 
+                                className="w-12 h-12"
+                            />
+                        </button>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* Left Column: Board */}
         <div className="flex-1 w-full flex flex-col items-center min-w-0">
           <div className="resize-x overflow-hidden w-full max-w-full min-w-[300px] aspect-square relative shadow-2xl rounded-sm">
              <Board 
@@ -252,10 +275,6 @@ function App() {
                 lastMove={gameState.history.length > 0 ? gameState.history[gameState.history.length - 1] : null}
                 bestMove={engineResult.bestMove}
               />
-              {/* Visual drag handle hint */}
-              <div className="absolute bottom-1 right-1 w-4 h-4 pointer-events-none opacity-50">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 21l-9-9m9 5l-5-5"/></svg>
-              </div>
           </div>
           <p className="text-xs text-slate-500 mt-2">Drag bottom-right to resize board</p>
         </div>
@@ -264,7 +283,7 @@ function App() {
         <div className="w-full md:w-[400px] flex-shrink-0 flex flex-col gap-4">
            <header className="mb-4">
              <h1 className="text-3xl font-extrabold text-amber-500 tracking-tight">Grandmaster Logic</h1>
-             <p className="text-slate-400 text-sm">Custom TS Engine • PVS (NegaScout) • Delta Pruning</p>
+             <p className="text-slate-400 text-sm">v4.0 • Persistent TT Cache • PVS • LMR</p>
            </header>
            
            <CapturedPieces board={gameState.board} />
@@ -284,7 +303,12 @@ function App() {
            />
 
            {engineEnabled && (
-             <AnalysisPanel result={engineResult} turn={gameState.turn} configDepth={engineConfig.depth} />
+             <AnalysisPanel 
+                result={engineResult} 
+                turn={gameState.turn} 
+                configDepth={engineConfig.depth} 
+                gameState={gameState} 
+             />
            )}
            
            <div className="p-4 bg-slate-800/50 rounded text-xs text-slate-500 border border-slate-800">
