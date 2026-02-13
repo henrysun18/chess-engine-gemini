@@ -1,7 +1,7 @@
 
 export const workerCode = `
 // ============================================================================
-// GRANDMASTER LOGIC: HIGH-PERFORMANCE BITWISE ENGINE (v3.4 - Knight Fix + Repetition)
+// GRANDMASTER LOGIC: HIGH-PERFORMANCE BITWISE ENGINE (v3.5 - Timer Logs)
 // ============================================================================
 
 // --- CONSTANTS ---
@@ -75,7 +75,9 @@ let historyPly = 0;
 
 let nodes = 0;
 let stopTime = 0;
+let startTime = 0;
 let lastReportTime = 0;
+let lastLogTime = 0;
 
 // Ordering Heuristics
 let killerMoves = new Int32Array(MAX_PLY * 2); 
@@ -444,6 +446,12 @@ function qsearch(alpha, beta) {
             self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
             lastReportTime = now;
         }
+        if(now - lastLogTime > 5000) {
+             const elapsed = ((now - startTime) / 1000).toFixed(1);
+             const remaining = ((stopTime - now) / 1000).toFixed(1);
+             log(\`[TIMER] \${elapsed}s elapsed. \${remaining}s remaining. Nodes: \${nodes}\`);
+             lastLogTime = now;
+        }
     }
     nodes++;
     
@@ -480,6 +488,12 @@ function alphabeta(depth, alpha, beta, ply) {
         if(now - lastReportTime > 500) {
              self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
              lastReportTime = now;
+        }
+        if(now - lastLogTime > 5000) {
+             const elapsed = ((now - startTime) / 1000).toFixed(1);
+             const remaining = ((stopTime - now) / 1000).toFixed(1);
+             log(\`[TIMER] \${elapsed}s elapsed. \${remaining}s remaining. Nodes: \${nodes}\`);
+             lastLogTime = now;
         }
     }
     nodes++;
@@ -569,8 +583,10 @@ self.onmessage = function(e) {
     try {
         parseFen(fen);
         nodes = 0;
-        stopTime = Date.now() + timeLimit;
-        lastReportTime = Date.now();
+        startTime = Date.now();
+        stopTime = startTime + timeLimit;
+        lastReportTime = startTime;
+        lastLogTime = startTime;
         currentRequestId = requestId;
         bestMoveGlobal = 0;
         bestScoreGlobal = 0;

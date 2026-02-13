@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Board } from './components/Board';
 import { Controls } from './components/Controls';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { ImportExportModal } from './components/ImportExportModal';
 import { CapturedPieces } from './components/CapturedPieces';
-import { GameState, Move, EngineConfig, EngineResult, BoardState } from './types';
-import { parseFen, generateFen, getLegalMoves, makeMove, getIndex, pgnToGameState, gameStateToPgn } from './utils/chessRules';
+import { GameState, Move, EngineConfig, EngineResult } from './types';
+import { parseFen, generateFen, getLegalMoves, makeMove, pgnToGameState, gameStateToPgn } from './utils/chessRules';
 import { fetchOpeningMove } from './utils/openingBook';
 import { INITIAL_FEN } from './constants';
 import { workerCode } from './services/engineWorkerBuilder';
@@ -21,7 +21,7 @@ function App() {
   // Engine State
   const [engineConfig, setEngineConfig] = useState<EngineConfig>({ 
     depth: 6, 
-    timeLimit: 2000, // 2 seconds default
+    timeLimit: 2000, 
     branchingFactor: 10,
     useDynamicBranching: true 
   });
@@ -37,107 +37,122 @@ function App() {
     value?: string;
   }>({ isOpen: false, type: 'fen', mode: 'import' });
 
+  // Worker ref is managed by the effect now
   const workerRef = useRef<Worker | null>(null);
-  const currentRequestId = useRef<number>(0);
 
-  // Initialize Worker
+  // --- Engine Lifecycle Management ---
   useEffect(() => {
+    // 1. Terminate existing worker immediately when dependencies change
+    if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+    }
+
+    // If engine is disabled or game over, stop here.
+    if (!engineEnabled || gameState.isGameOver) {
+        setEngineResult(prev => ({ ...prev, isThinking: false, bestMove: null }));
+        return;
+    }
+
+    let isCancelled = false;
+
+    // 2. Create new Worker for this specific move/config
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
-    workerRef.current = new Worker(url);
+    const worker = new Worker(url);
+    workerRef.current = worker;
 
-    workerRef.current.onmessage = (e) => {
-      const { type, bestMove, score, nodes, depth, requestId, message } = e.data;
-      
-      // Prevent race conditions
-      if (requestId !== undefined && requestId !== currentRequestId.current) return;
+    // 3. Setup message handler
+    worker.onmessage = (e) => {
+        if (isCancelled) return;
+        const { type, bestMove, score, nodes, depth, message } = e.data;
 
-      if (type === 'log') {
-         setEngineResult(prev => ({
-             ...prev,
-             logs: [...prev.logs, `[Worker] ${message}`].slice(-50) // Keep last 50 logs
-         }));
-      } else if (type === 'progress') {
-        setEngineResult(prev => ({ 
-          ...prev, 
-          evaluation: score, 
-          nodesSearched: nodes, 
-          currentDepth: depth,
-          isThinking: true, 
-          bestMove: bestMove 
-        }));
-      } else if (type === 'done') {
-        setEngineResult(prev => ({
-          ...prev,
-          bestMove, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: false, pv: []
-        }));
-      }
-    };
-
-    workerRef.current.onerror = (err) => {
-       console.error("Worker terminated unexpectedly:", err);
-       setEngineResult(prev => ({
-           ...prev,
-           isThinking: false,
-           logs: [...prev.logs, `[CRITICAL] Worker crashed: ${err.message}`]
-       }));
-    };
-
-    return () => {
-      workerRef.current?.terminate();
-      URL.revokeObjectURL(url);
-    };
-  }, []);
-
-  // Trigger Engine Analysis with Opening Book Check
-  useEffect(() => {
-    const runAnalysis = async () => {
-        if (engineEnabled && !gameState.isGameOver) {
-          const requestId = Date.now();
-          currentRequestId.current = requestId;
-
-          // Reset thinking state
-          setEngineResult(prev => ({ ...prev, isThinking: true, bestMove: null, currentDepth: 0, logs: [] })); 
-
-          // 1. Try Opening Book First
-          if (gameState.fullMoveNumber <= 12) { // Only check book in early game
-             setEngineResult(prev => ({ ...prev, logs: ['Checking Lichess Masters Book...'] }));
-             const bookMove = await fetchOpeningMove(gameState);
-             
-             // Check if request is still valid after await
-             if (currentRequestId.current === requestId && bookMove) {
-                 setEngineResult(prev => ({
-                     ...prev,
-                     isThinking: false,
-                     bestMove: bookMove,
-                     evaluation: 0, // Book moves are "equal" or "good" implicitly
-                     nodesSearched: 0,
-                     currentDepth: 0,
-                     logs: [...prev.logs, `Book Move Found: ${bookMove.from}->${bookMove.to}`]
-                 }));
-                 return; // Exit, do not use worker
-             }
-          }
-
-          // 2. Fallback to Engine Worker
-          if (workerRef.current && currentRequestId.current === requestId) {
-              const fen = generateFen(gameState);
-              workerRef.current.postMessage({
-                fen,
-                depth: engineConfig.depth,
-                timeLimit: engineConfig.timeLimit,
-                branchingFactor: engineConfig.branchingFactor,
-                useDynamicBranching: engineConfig.useDynamicBranching,
-                requestId
-              });
-          }
-        } else {
-            setEngineResult(prev => ({...prev, isThinking: false, bestMove: null }));
+        if (type === 'log') {
+            setEngineResult(prev => ({
+                ...prev,
+                logs: [...prev.logs, `[Worker] ${message}`].slice(-50)
+            }));
+        } else if (type === 'progress') {
+            setEngineResult(prev => ({ 
+                ...prev, 
+                evaluation: score, 
+                nodesSearched: nodes, 
+                currentDepth: depth,
+                isThinking: true, 
+                bestMove: bestMove 
+            }));
+        } else if (type === 'done') {
+            setEngineResult(prev => ({
+                ...prev,
+                bestMove, evaluation: score, nodesSearched: nodes, currentDepth: depth, isThinking: false, pv: []
+            }));
         }
     };
 
+    worker.onerror = (err) => {
+        console.error("Worker error:", err);
+        setEngineResult(prev => ({
+           ...prev,
+           isThinking: false,
+           logs: [...prev.logs, `[CRITICAL] Worker crashed: ${err.message}`]
+        }));
+    };
+
+    // 4. Run Analysis Logic
+    const runAnalysis = async () => {
+        const requestId = Date.now();
+        
+        // Reset UI for new think
+        setEngineResult(prev => ({ ...prev, isThinking: true, bestMove: null, currentDepth: 0, logs: [] }));
+
+        // Check Opening Book
+        if (gameState.fullMoveNumber <= 20) {
+            setEngineResult(prev => ({ ...prev, logs: ['Checking Lichess Masters Book...'] }));
+            const bookMove = await fetchOpeningMove(gameState);
+            
+            if (isCancelled) return;
+
+            if (bookMove) {
+                setEngineResult(prev => ({
+                    ...prev,
+                    isThinking: false,
+                    bestMove: bookMove,
+                    evaluation: 0,
+                    nodesSearched: 0,
+                    currentDepth: 0,
+                    logs: [...prev.logs, `Book Move Found: ${bookMove.from}->${bookMove.to}`]
+                }));
+                return; 
+            } else {
+                setEngineResult(prev => ({ ...prev, logs: [...prev.logs, 'Book move not found. Starting Engine...'] }));
+            }
+        }
+
+        if (isCancelled) return;
+
+        // Send to Engine
+        const fen = generateFen(gameState);
+        worker.postMessage({
+            fen,
+            depth: engineConfig.depth,
+            timeLimit: engineConfig.timeLimit,
+            branchingFactor: engineConfig.branchingFactor,
+            useDynamicBranching: engineConfig.useDynamicBranching,
+            requestId
+        });
+    };
+
     runAnalysis();
+
+    // 5. Cleanup
+    return () => {
+        isCancelled = true;
+        worker.terminate();
+        URL.revokeObjectURL(url);
+        workerRef.current = null;
+    };
   }, [gameState, engineEnabled, engineConfig]);
+
 
   // Handle Square Click
   const handleSquareClick = (index: number) => {
@@ -252,7 +267,7 @@ function App() {
              <p className="text-slate-400 text-sm">Custom TS Engine • PVS (NegaScout) • Delta Pruning</p>
            </header>
            
-           <CapturedPieces history={gameState.history} />
+           <CapturedPieces board={gameState.board} />
 
            <Controls 
              onReset={handleReset}

@@ -5,16 +5,23 @@ import { generateFen, getLegalMoves, makeMove, moveToSan } from './chessRules';
 const LICHESS_API_URL = 'https://explorer.lichess.ovh/masters';
 
 export const fetchOpeningMove = async (gameState: GameState): Promise<Move | null> => {
-  // Only check opening book for the first 12 full moves to save API calls/time
-  if (gameState.fullMoveNumber > 12) return null;
+  // Only check opening book for the first 20 full moves
+  if (gameState.fullMoveNumber > 20) return null;
 
   try {
     // Generate FEN but strip move clocks as the book doesn't care about 50-move rule usually
     const fen = generateFen(gameState);
     const cleanFen = fen.split(' ').slice(0, 4).join(' '); // fen without clocks
     
-    // We pass the full FEN to lichess
-    const response = await fetch(`${LICHESS_API_URL}?fen=${encodeURIComponent(fen)}&moves=5`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second max timeout
+
+    // Pass cleanFen to API
+    const response = await fetch(`${LICHESS_API_URL}?fen=${encodeURIComponent(cleanFen)}&moves=5`, { 
+        signal: controller.signal 
+    });
+    
+    clearTimeout(timeoutId);
     
     if (!response.ok) return null;
     
@@ -46,7 +53,7 @@ export const fetchOpeningMove = async (gameState: GameState): Promise<Move | nul
     const legalMoves = getLegalMoves(gameState);
     
     // We need to match the SAN. 
-    // Warning: Our `moveToSan` is basic. Ideally we match purely by UCI if available, but Lichess gives UCI too.
+    // Match purely by UCI if available
     const selectedUci = moves.find((m: any) => m.san === selectedSan)?.uci; // e.g. "e2e4"
     
     if (selectedUci) {
@@ -65,10 +72,7 @@ export const fetchOpeningMove = async (gameState: GameState): Promise<Move | nul
 
     // Fallback: Try to match SAN
     for (const move of legalMoves) {
-        // Create temp state to verify SAN
         const tempState = makeMove(gameState, move);
-        // Note: This relies on our `moveToSan` matching Lichess exactly, which might have edge cases.
-        // The UCI method above is much safer.
         if (moveToSan(move, gameState, tempState) === selectedSan) {
             return move;
         }
@@ -77,7 +81,7 @@ export const fetchOpeningMove = async (gameState: GameState): Promise<Move | nul
     return null;
 
   } catch (error) {
-    console.warn("Opening book fetch failed:", error);
+    // Quietly fail for aborts or network errors
     return null;
   }
 };
