@@ -2,33 +2,11 @@
 import React from 'react';
 import { BoardState, PieceType, PieceColor } from '../types';
 import { PIECE_VALUES } from '../constants';
+import { PieceIcon } from './PieceIcons';
 
 interface CapturedPiecesProps {
   board: BoardState;
 }
-
-const getWikiUrl = (color: PieceColor, type: PieceType) => {
-    const c = color === 'w' ? 'l' : 'd';
-    const t = type;
-    const key = `${t}${c}`;
-    
-    const urls: Record<string, string> = {
-      pl: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
-      nl: 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
-      bl: 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
-      rl: 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
-      ql: 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
-      kl: 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg',
-      
-      pd: 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
-      nd: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
-      bd: 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
-      rd: 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
-      qd: 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
-      kd: 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg',
-    };
-    return urls[key];
-};
 
 export const CapturedPieces: React.FC<CapturedPiecesProps> = ({ board }) => {
   // Standard starting counts for one side
@@ -84,12 +62,9 @@ export const CapturedPieces: React.FC<CapturedPiecesProps> = ({ board }) => {
     <div className="flex items-center gap-2 h-8 bg-slate-800/50 rounded px-2 border border-slate-700 w-full">
       <div className="flex -space-x-1.5 overflow-hidden">
         {pieces.sort((a,b) => PIECE_VALUES[a] - PIECE_VALUES[b]).map((p, i) => (
-          <img 
-            key={i} 
-            src={getWikiUrl(color === 'w' ? 'b' : 'w', p)} // Flip color to show the piece that was captured
-            alt={p} 
-            className="w-5 h-5 opacity-90"
-          />
+          <div key={i} className="w-5 h-5 opacity-90 relative">
+             <PieceIcon color={color === 'w' ? 'b' : 'w'} type={p} />
+          </div>
         ))}
         {pieces.length === 0 && <span className="text-xs text-slate-600 italic">None</span>}
       </div>

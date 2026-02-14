@@ -38,6 +38,7 @@ export interface GameState {
 }
 
 export interface EngineConfig {
+  engineId: 'A' | 'B'; // 'A' = Classic (PeSTO), 'B' = Neural (NNUE-like + NMP)
   depth: number;
   timeLimit: number; // Time limit in milliseconds
   branchingFactor: number; // Used only if useDynamicBranching is false

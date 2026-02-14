@@ -41,6 +41,22 @@ export const Controls: React.FC<ControlsProps> = ({
     });
   };
 
+  const handleEngineSelect = (id: 'OFF' | 'A' | 'B') => {
+      if (id === 'OFF') {
+          setEngineEnabled(false);
+      } else {
+          setEngineEnabled(true);
+          // Auto-adjust parameters for Engine B (NNUE is slower per node, but searches smarter)
+          if (id === 'B' && config.engineId !== 'B') {
+               setConfig({ ...config, engineId: 'B', depth: 8, timeLimit: 3000 });
+               setLocalDepth(8);
+               setLocalTime(3000);
+          } else if (id === 'A' && config.engineId !== 'A') {
+               setConfig({ ...config, engineId: 'A' });
+          }
+      }
+  };
+
   return (
     <div className="flex flex-col gap-2 p-3 bg-slate-800 rounded-lg border border-slate-700 w-full max-w-[600px]">
       <div className="flex justify-between items-center border-b border-slate-700 pb-1 mb-1">
@@ -60,25 +76,39 @@ export const Controls: React.FC<ControlsProps> = ({
       </div>
 
       <div className="space-y-2 pt-1">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-slate-300">Engine Analysis</label>
-          <button 
-            onClick={() => setEngineEnabled(!engineEnabled)}
-            className={`w-10 h-5 rounded-full transition-colors relative ${engineEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${engineEnabled ? 'left-5.5' : 'left-0.5'}`} style={{left: engineEnabled ? '22px' : '2px'}} />
-          </button>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-slate-300">Engine Selection</label>
+          <div className="flex bg-slate-900 rounded p-1 gap-1">
+              <button 
+                onClick={() => handleEngineSelect('OFF')}
+                className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${!engineEnabled ? 'bg-slate-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                  OFF
+              </button>
+              <button 
+                onClick={() => handleEngineSelect('A')}
+                className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${engineEnabled && config.engineId === 'A' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                  ENGINE A (Classic)
+              </button>
+              <button 
+                onClick={() => handleEngineSelect('B')}
+                className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${engineEnabled && config.engineId === 'B' ? 'bg-purple-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                  ENGINE B (Neural)
+              </button>
+          </div>
         </div>
 
         {engineEnabled && (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-1 animate-in fade-in">
             <div className="space-y-0.5">
               <div className="flex justify-between">
                 <label className="text-[10px] text-slate-400">Max Depth</label>
                 <span className="text-[10px] font-mono text-amber-400">{localDepth}</span>
               </div>
               <input 
-                type="range" min="1" max="12" step="1" 
+                type="range" min="1" max={config.engineId === 'B' ? 14 : 12} step="1" 
                 value={localDepth} 
                 onChange={(e) => setLocalDepth(parseInt(e.target.value))}
                 onMouseUp={commitChanges}
@@ -103,7 +133,9 @@ export const Controls: React.FC<ControlsProps> = ({
             </div>
 
             <div className="flex items-center justify-between col-span-2 pt-1">
-               <label className="text-[10px] text-slate-300">Smart Pruning (PVS + LMR)</label>
+               <label className="text-[10px] text-slate-300">
+                  {config.engineId === 'A' ? 'Smart Pruning (PVS + LMR)' : 'Deep Search (NMP + Futility)'}
+               </label>
                <input 
                  type="checkbox"
                  checked={config.useDynamicBranching}
@@ -113,7 +145,7 @@ export const Controls: React.FC<ControlsProps> = ({
             </div>
             
             {!config.useDynamicBranching && (
-                <div className="space-y-0.5 col-span-2 animate-in fade-in">
+                <div className="space-y-0.5 col-span-2">
                   <div className="flex justify-between">
                      <label className="text-[10px] text-slate-400">Branching Factor</label>
                      <span className="text-[10px] font-mono text-amber-400">{localBranching}</span>

@@ -1,6 +1,8 @@
+
 import React from 'react';
 import { BoardState, Move, PieceColor, PieceType } from '../types';
 import { getRow, getCol } from '../utils/chessRules';
+import { PieceIcon } from './PieceIcons';
 
 interface BoardProps {
   board: BoardState;
@@ -13,35 +15,10 @@ interface BoardProps {
 }
 
 const PieceDisplay = ({ piece }: { piece: { color: PieceColor; type: PieceType } }) => {
-  const getWikiUrl = (color: PieceColor, type: PieceType) => {
-    const c = color === 'w' ? 'l' : 'd';
-    const t = type;
-    const key = `${t}${c}`;
-    
-    const urls: Record<string, string> = {
-      pl: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
-      nl: 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
-      bl: 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
-      rl: 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
-      ql: 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
-      kl: 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg',
-      
-      pd: 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
-      nd: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
-      bd: 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
-      rd: 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
-      qd: 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
-      kd: 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg',
-    };
-    return urls[key];
-  };
-
   return (
-    <img 
-      src={getWikiUrl(piece.color, piece.type)} 
-      alt={`${piece.color}${piece.type}`}
-      className="w-[85%] h-[85%] select-none cursor-pointer transition-transform hover:scale-105 drop-shadow-sm"
-    />
+    <div className="w-[85%] h-[85%] select-none cursor-pointer transition-transform hover:scale-105 drop-shadow-sm flex items-center justify-center">
+      <PieceIcon color={piece.color} type={piece.type} />
+    </div>
   );
 };
 
