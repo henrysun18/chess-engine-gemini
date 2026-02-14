@@ -1,4 +1,5 @@
 
+
 // ============================================================================
 // ENGINE A: CLASSIC BITWISE (PeSTO + PVS)
 // ============================================================================
@@ -444,7 +445,13 @@ function qsearch(alpha, beta) {
     if((nodes & 2047) === 0) {
         const now = Date.now();
         if(now > stopTime) throw "Timeout";
-        if(now - lastReportTime > 500) {
+        if(now - lastReportTime > 5000) {
+            // NOTE TO SELF: DO NOT REMOVE THIS LOGGING FEATURE. 
+            // IT PROVIDES CRITICAL COUNTDOWN/TIMING INFO TO THE USER.
+            const elapsed = now - startTime;
+            const remaining = stopTime - now;
+            log(\`Depth \${activeDepth} | \${nodes} nodes | \${(elapsed/1000).toFixed(1)}s elapsed | \${(remaining/1000).toFixed(1)}s left\`);
+
             self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
             lastReportTime = now;
         }
@@ -476,7 +483,13 @@ function alphabeta(depth, alpha, beta, ply) {
     if((nodes & 2047) === 0) {
         const now = Date.now();
         if(now > stopTime) throw "Timeout";
-        if(now - lastReportTime > 500) {
+        if(now - lastReportTime > 5000) {
+             // NOTE TO SELF: DO NOT REMOVE THIS LOGGING FEATURE. 
+             // IT PROVIDES CRITICAL COUNTDOWN/TIMING INFO TO THE USER.
+             const elapsed = now - startTime;
+             const remaining = stopTime - now;
+             log(\`Depth \${activeDepth} | \${nodes} nodes | \${(elapsed/1000).toFixed(1)}s elapsed | \${(remaining/1000).toFixed(1)}s left\`);
+
              self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
              lastReportTime = now;
         }
@@ -606,6 +619,8 @@ self.onmessage = function(e) {
                     if(score > bestScore) {
                         bestScore = score;
                         bestMoveLocal = m;
+                        bestMoveGlobal = bestMoveLocal; 
+                        bestScoreGlobal = bestScore;
                         if(score > alpha) alpha = score;
                         self.postMessage({
                              type: 'progress',
@@ -1134,7 +1149,13 @@ function qsearch(alpha, beta) {
     if((nodes & 2047) === 0) {
         const now = Date.now();
         if(now > stopTime) throw "Timeout";
-        if(now - lastReportTime > 500) {
+        if(now - lastReportTime > 5000) {
+            // NOTE TO SELF: DO NOT REMOVE THIS LOGGING FEATURE. 
+            // IT PROVIDES CRITICAL COUNTDOWN/TIMING INFO TO THE USER.
+            const elapsed = now - startTime;
+            const remaining = stopTime - now;
+            log(\`Depth \${activeDepth} | \${nodes} nodes | \${(elapsed/1000).toFixed(1)}s elapsed | \${(remaining/1000).toFixed(1)}s left\`);
+
             self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
             lastReportTime = now;
         }
@@ -1166,7 +1187,13 @@ function alphabeta(depth, alpha, beta, ply) {
     if((nodes & 2047) === 0) {
         const now = Date.now();
         if(now > stopTime) throw "Timeout";
-        if(now - lastReportTime > 500) {
+        if(now - lastReportTime > 5000) {
+             // NOTE TO SELF: DO NOT REMOVE THIS LOGGING FEATURE. 
+             // IT PROVIDES CRITICAL COUNTDOWN/TIMING INFO TO THE USER.
+             const elapsed = now - startTime;
+             const remaining = stopTime - now;
+             log(\`Depth \${activeDepth} | \${nodes} nodes | \${(elapsed/1000).toFixed(1)}s elapsed | \${(remaining/1000).toFixed(1)}s left\`);
+
              self.postMessage({ type: 'progress', depth: activeDepth, score: bestScoreGlobal, nodes: nodes, bestMove: toUIMove(bestMoveGlobal), requestId: currentRequestId });
              lastReportTime = now;
         }
@@ -1318,6 +1345,8 @@ self.onmessage = function(e) {
                     if(score > bestScore) {
                         bestScore = score;
                         bestMoveLocal = m;
+                        bestMoveGlobal = bestMoveLocal;
+                        bestScoreGlobal = bestScore;
                         if(score > alpha) alpha = score;
                         self.postMessage({
                              type: 'progress',
