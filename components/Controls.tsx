@@ -73,8 +73,11 @@ export const Controls: React.FC<ControlsProps> = ({
         <button onClick={onUndo} className="flex-1 bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium transition-colors">
           Undo
         </button>
-        <button onClick={onFlipBoard} className="flex-1 bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium transition-colors">
-          Flip Board
+        <button 
+          onClick={onFlipBoard} 
+          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${isFlipped ? 'bg-amber-700 hover:bg-amber-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
+        >
+          {isFlipped ? 'Unflip' : 'Flip'} Board
         </button>
         <button onClick={onReset} className="flex-1 bg-red-900/50 hover:bg-red-800/50 text-red-200 px-3 py-1.5 rounded text-xs font-medium transition-colors">
           Reset

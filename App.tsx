@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Board } from './components/Board';
 import { Controls } from './components/Controls';
 import { AnalysisPanel } from './components/AnalysisPanel';

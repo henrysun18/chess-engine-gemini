@@ -1,5 +1,6 @@
+
 import { BoardState, Move, PieceColor, Piece, PieceType, GameState } from '../types';
-import { INITIAL_FEN, SQUARES_COUNT } from '../constants';
+import { INITIAL_FEN } from '../constants';
 
 // --- Helpers ---
 export const getRow = (i: number) => Math.floor(i / 8);
