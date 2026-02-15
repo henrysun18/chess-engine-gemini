@@ -21,6 +21,7 @@ function App() {
   const [engineEnabled, setEngineEnabled] = useState(false);
   const [pendingPromotion, setPendingPromotion] = useState<{ move: Move; from: number; to: number } | null>(null);
   const [isFlipped, setIsFlipped] = useState(false);
+  const [useOpeningBook, setUseOpeningBook] = useState(true);
   
   // Engine State
   const [engineConfig, setEngineConfig] = useState<EngineConfig>({ 
@@ -94,8 +95,8 @@ function App() {
         // Reset UI for new think
         setEngineResult(prev => ({ ...prev, isThinking: true, bestMove: null, currentDepth: 0, logs: [] }));
 
-        // Check Opening Book (Only if less than 20 moves)
-        if (gameState.fullMoveNumber <= 20) {
+        // Check Opening Book (Only if enabled and less than 20 moves)
+        if (useOpeningBook && gameState.fullMoveNumber <= 20) {
             setEngineResult(prev => ({ ...prev, logs: ['Checking Lichess Masters Book...'] }));
             const bookMove = await fetchOpeningMove(gameState);
             
@@ -139,7 +140,7 @@ function App() {
         URL.revokeObjectURL(url);
         workerRef.current = null;
     };
-  }, [gameState, engineEnabled, engineConfig.engineId, engineConfig.depth, engineConfig.timeLimit, engineConfig.branchingFactor, engineConfig.useDynamicBranching]);
+  }, [gameState, engineEnabled, engineConfig.engineId, engineConfig.depth, engineConfig.timeLimit, engineConfig.branchingFactor, engineConfig.useDynamicBranching, useOpeningBook]);
 
 
   // Handle Square Click
@@ -238,8 +239,8 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center py-8 px-4 font-sans">
-      <div className="w-full max-w-[1600px] flex flex-col md:flex-row gap-8 items-start justify-center relative">
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center py-4 px-2 font-sans overflow-hidden">
+      <div className="w-full max-w-[1400px] flex flex-col md:flex-row gap-4 items-start justify-center relative h-[calc(100vh-2rem)]">
         
         {/* Promotion Overlay */}
         {pendingPromotion && (
@@ -261,8 +262,8 @@ function App() {
         )}
 
         {/* Left Column: Board */}
-        <div className="flex-1 w-full flex flex-col items-center min-w-0">
-          <div className="resize-x overflow-hidden w-full max-w-full min-w-[300px] aspect-square relative shadow-2xl rounded-sm">
+        <div className="flex-1 w-full h-full flex flex-col items-center justify-center min-w-0">
+          <div className="resize w-full max-w-[90vh] aspect-square relative shadow-2xl rounded-sm">
              <Board 
                 board={gameState.board} 
                 turn={gameState.turn}
@@ -274,21 +275,22 @@ function App() {
                 isFlipped={isFlipped}
               />
           </div>
-          <p className="text-xs text-slate-500 mt-2">Drag bottom-right to resize board</p>
         </div>
 
         {/* Right Column: UI & Analysis */}
-        <div className="w-full md:w-[400px] flex-shrink-0 flex flex-col gap-4">
-           <header className="mb-4">
-             <h1 className="text-3xl font-extrabold text-amber-500 tracking-tight">Grandmaster Logic</h1>
-             <p className="text-slate-400 text-sm">
+        <div className="w-full md:w-[350px] flex-shrink-0 flex flex-col gap-2 h-full overflow-y-auto pr-1">
+           <header className="mb-1 shrink-0">
+             <h1 className="text-xl font-extrabold text-amber-500 tracking-tight">Grandmaster Logic</h1>
+             <p className="text-slate-400 text-xs truncate">
                  {engineEnabled ? 
-                    (engineConfig.engineId === 'B' ? 'v5.0 • Engine B: Neural Accumulator + NMP' : 'v4.0 • Engine A: Classic PeSTO + PVS') 
+                    (engineConfig.engineId === 'B' ? 'v5.0 • Neural + NMP' : 'v4.0 • Classic PeSTO') 
                     : 'Select an engine to begin analysis'}
              </p>
            </header>
            
-           <CapturedPieces board={gameState.board} />
+           <div className="shrink-0">
+               <CapturedPieces board={gameState.board} />
+           </div>
 
            <Controls 
              onReset={handleReset}
@@ -304,21 +306,25 @@ function App() {
              gameState={gameState.isGameOver ? (gameState.winner ? `Winner: ${gameState.winner}` : 'Draw') : 'playing'}
              isFlipped={isFlipped}
              onFlipBoard={() => setIsFlipped(!isFlipped)}
+             useOpeningBook={useOpeningBook}
+             setUseOpeningBook={setUseOpeningBook}
            />
 
            {engineEnabled && (
-             <AnalysisPanel 
-                result={engineResult} 
-                turn={gameState.turn} 
-                configDepth={engineConfig.depth} 
-                gameState={gameState} 
-                isFlipped={isFlipped}
-             />
+             <div className="shrink-0">
+                 <AnalysisPanel 
+                    result={engineResult} 
+                    turn={gameState.turn} 
+                    configDepth={engineConfig.depth} 
+                    gameState={gameState} 
+                    isFlipped={isFlipped}
+                 />
+             </div>
            )}
            
-           <div className="p-4 bg-slate-800/50 rounded text-xs text-slate-500 border border-slate-800">
-             <h4 className="font-bold text-slate-400 mb-1">Debug Info</h4>
-             <p>Moves in history: {gameState.history.length}</p>
+           <div className="p-2 bg-slate-800/50 rounded text-[10px] text-slate-500 border border-slate-800 shrink-0">
+             <h4 className="font-bold text-slate-400 mb-0.5">Debug Info</h4>
+             <p>Moves: {gameState.history.length}</p>
              <p>Hash: {generateFen(gameState).substring(0, 20)}...</p>
            </div>
         </div>

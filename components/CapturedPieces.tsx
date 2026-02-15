@@ -59,27 +59,27 @@ export const CapturedPieces: React.FC<CapturedPiecesProps> = ({ board }) => {
   const diff = (whiteMat - blackMat) / 100;
 
   const renderGroup = (pieces: PieceType[], color: PieceColor, advantage: number) => (
-    <div className="flex items-center gap-2 h-8 bg-slate-800/50 rounded px-2 border border-slate-700 w-full">
-      <div className="flex -space-x-1.5 overflow-hidden">
+    <div className="flex items-center gap-1 h-6 bg-slate-800/50 rounded px-1.5 border border-slate-700 w-full">
+      <div className="flex -space-x-1 overflow-hidden">
         {pieces.sort((a,b) => PIECE_VALUES[a] - PIECE_VALUES[b]).map((p, i) => (
-          <div key={i} className="w-5 h-5 opacity-90 relative">
+          <div key={i} className="w-4 h-4 opacity-90 relative">
              <PieceIcon color={color === 'w' ? 'b' : 'w'} type={p} />
           </div>
         ))}
-        {pieces.length === 0 && <span className="text-xs text-slate-600 italic">None</span>}
+        {pieces.length === 0 && <span className="text-[10px] text-slate-600 italic">None</span>}
       </div>
-      {advantage > 0 && <span className="text-xs font-bold text-slate-400 ml-auto">+{advantage.toFixed(0)}</span>}
+      {advantage > 0 && <span className="text-[10px] font-bold text-slate-400 ml-auto">+{advantage.toFixed(0)}</span>}
     </div>
   );
 
   return (
-    <div className="flex flex-col gap-2 w-full">
-      <div className="flex justify-between items-center text-xs text-slate-400 px-1">
+    <div className="flex flex-col gap-1 w-full">
+      <div className="flex justify-between items-center text-[10px] text-slate-400 px-1">
         <span>Captured by White</span>
       </div>
       {renderGroup(whiteCaptured, 'w', diff > 0 ? diff : 0)}
       
-      <div className="flex justify-between items-center text-xs text-slate-400 px-1 mt-1">
+      <div className="flex justify-between items-center text-[10px] text-slate-400 px-1 mt-0.5">
         <span>Captured by Black</span>
       </div>
       {renderGroup(blackCaptured, 'b', diff < 0 ? Math.abs(diff) : 0)}

@@ -109,7 +109,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
   }
 
   return (
-    <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 w-full max-w-[600px] mt-2 shadow-lg">
+    <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 w-full max-w-[600px] mt-1 shadow-lg">
       <div className="flex justify-between items-end mb-1">
         <h3 className="text-xs font-bold text-slate-300">Engine Analysis</h3>
         {result.isThinking && (
@@ -120,7 +120,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
       </div>
       
       {/* Evaluation Bar */}
-      <div className="w-full h-3 bg-slate-600 rounded-full overflow-hidden relative mb-2 border border-slate-700">
+      <div className="w-full h-2 bg-slate-600 rounded-full overflow-hidden relative mb-1.5 border border-slate-700">
          <div 
            className="h-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500 transition-all duration-500"
            style={{ width: `${evalPercent}%` }}
@@ -128,23 +128,23 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
          <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-slate-900/80 z-10" />
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-sm mb-2">
-        <div className="bg-slate-700/50 p-1.5 rounded">
-           <p className="text-[10px] text-slate-500 uppercase font-semibold">Evaluation ({isFlipped ? 'Black' : 'White'})</p>
-           <p className={`font-mono text-lg leading-tight font-bold ${displayScore > 0 ? 'text-green-400' : displayScore < 0 ? 'text-red-400' : 'text-slate-200'}`}>
+      <div className="grid grid-cols-2 gap-2 text-sm mb-1.5">
+        <div className="bg-slate-700/50 p-1 rounded">
+           <p className="text-[9px] text-slate-500 uppercase font-semibold">Evaluation ({isFlipped ? 'Black' : 'White'})</p>
+           <p className={`font-mono text-base leading-tight font-bold ${displayScore > 0 ? 'text-green-400' : displayScore < 0 ? 'text-red-400' : 'text-slate-200'}`}>
              {scoreDisplay}
            </p>
         </div>
-        <div className="bg-slate-700/50 p-1.5 rounded">
-           <p className="text-[10px] text-slate-500 uppercase font-semibold">Nodes Searched</p>
-           <p className="font-mono text-slate-200 text-lg leading-tight">
+        <div className="bg-slate-700/50 p-1 rounded">
+           <p className="text-[9px] text-slate-500 uppercase font-semibold">Nodes Searched</p>
+           <p className="font-mono text-slate-200 text-base leading-tight">
              {formatNodes(result.nodesSearched)}
            </p>
         </div>
       </div>
 
-      <div className="space-y-0.5 mb-2">
-        <div className="flex justify-between text-[10px] text-slate-400">
+      <div className="space-y-0.5 mb-1.5">
+        <div className="flex justify-between text-[9px] text-slate-400">
           <span>Depth Progress</span>
           <span>{result.currentDepth} / {configDepth}</span>
         </div>
@@ -157,18 +157,18 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
       </div>
       
       {!result.isThinking && bestMoveSan && (
-         <div className="mt-2 pt-2 border-t border-slate-700">
-           <div className="text-[10px] text-slate-500 uppercase font-semibold mb-0.5">Best Line Found</div>
-           <div className="text-emerald-400 font-mono text-xl font-bold flex items-center gap-2">
-             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+         <div className="mt-1 pt-1 border-t border-slate-700">
+           <div className="text-[9px] text-slate-500 uppercase font-semibold mb-0.5">Best Line Found</div>
+           <div className="text-emerald-400 font-mono text-lg font-bold flex items-center gap-2">
+             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
              {bestMoveSan}
            </div>
          </div>
       )}
 
-      <div className="mt-2 pt-1 border-t border-slate-700">
-          <p className="text-[10px] text-slate-500 mb-0.5 font-bold">WORKER LOGS</p>
-          <div ref={logsRef} className="h-16 bg-black/50 rounded p-1.5 overflow-y-auto font-mono text-[9px] text-slate-400 leading-tight">
+      <div className="mt-1 pt-1 border-t border-slate-700">
+          <p className="text-[9px] text-slate-500 mb-0.5 font-bold">WORKER LOGS</p>
+          <div ref={logsRef} className="h-12 bg-black/50 rounded p-1 overflow-y-auto font-mono text-[9px] text-slate-400 leading-tight">
             {result.logs.length === 0 ? (
                 <span className="italic opacity-50">Waiting for engine...</span>
             ) : (
