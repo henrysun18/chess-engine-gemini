@@ -240,7 +240,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center py-4 px-2 font-sans overflow-hidden">
-      <div className="w-full max-w-[1400px] flex flex-col md:flex-row gap-4 items-start justify-center relative h-[calc(100vh-2rem)]">
+      <div className="w-full max-w-[1400px] flex flex-row gap-4 items-start justify-center relative h-[calc(100vh-2rem)]">
         
         {/* Promotion Overlay */}
         {pendingPromotion && (
@@ -278,7 +278,7 @@ function App() {
         </div>
 
         {/* Right Column: UI & Analysis */}
-        <div className="w-full md:w-[350px] flex-shrink-0 flex flex-col gap-2 h-full overflow-y-auto pr-1">
+        <div className="w-[350px] flex-shrink-0 flex flex-col gap-2 h-full overflow-y-auto pr-1">
            <header className="mb-1 shrink-0">
              <h1 className="text-xl font-extrabold text-amber-500 tracking-tight">Grandmaster Logic</h1>
              <p className="text-slate-400 text-xs truncate">
