@@ -14,11 +14,14 @@ interface ControlsProps {
   engineEnabled: boolean;
   setEngineEnabled: (b: boolean) => void;
   gameState: string; // 'playing', 'checkmate', etc
+  isFlipped: boolean;
+  onFlipBoard: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({ 
   onReset, onUndo, onImportFen, onExportFen, onImportPgn, onExportPgn,
-  config, setConfig, engineEnabled, setEngineEnabled, gameState 
+  config, setConfig, engineEnabled, setEngineEnabled, gameState,
+  isFlipped, onFlipBoard
 }) => {
   // Local state for sliders to prevent rapid-fire updates to the engine
   const [localDepth, setLocalDepth] = useState(config.depth);
@@ -69,6 +72,9 @@ export const Controls: React.FC<ControlsProps> = ({
       <div className="flex gap-2">
         <button onClick={onUndo} className="flex-1 bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium transition-colors">
           Undo
+        </button>
+        <button onClick={onFlipBoard} className="flex-1 bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium transition-colors">
+          Flip Board
         </button>
         <button onClick={onReset} className="flex-1 bg-red-900/50 hover:bg-red-800/50 text-red-200 px-3 py-1.5 rounded text-xs font-medium transition-colors">
           Reset

@@ -8,9 +8,10 @@ interface AnalysisPanelProps {
   turn: PieceColor;
   configDepth: number;
   gameState: GameState;
+  isFlipped: boolean;
 }
 
-export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, configDepth, gameState }) => {
+export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, configDepth, gameState, isFlipped }) => {
   const [nps, setNps] = useState(0);
   const prevNodes = useRef(0);
   const lastTime = useRef(Date.now());
@@ -42,31 +43,41 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
   }, [result.isThinking, result.nodesSearched]);
 
   // Score Logic
-  let whiteRelativeScore = result.evaluation;
-  if (turn === 'b') {
-      whiteRelativeScore = -result.evaluation;
-  }
+  // The engine (NegaMax) returns score relative to the side to move.
+  // We first convert this to a score relative to White (Standard Centipawns)
+  const whiteScore = turn === 'w' ? result.evaluation : -result.evaluation;
+  
+  // Then we calculate the display score based on the board flip.
+  // If flipped (Black perspective), we invert the white score.
+  // Example: White winning (+200). Flipped -> -200 (Bad for me).
+  // Example: Black winning (-200). Flipped -> +200 (Good for me).
+  const displayScore = isFlipped ? -whiteScore : whiteScore;
   
   let scoreDisplay = "";
   const MATE_THRESHOLD = 20000;
   const isMate = Math.abs(result.evaluation) > MATE_THRESHOLD;
   
   if (isMate) {
-      const movesToMate = Math.ceil((29000 - Math.abs(whiteRelativeScore)) / 2);
-      const isWhiteWinning = whiteRelativeScore > 0;
-      scoreDisplay = `M# ${isWhiteWinning ? '+' : '-'}${movesToMate}`;
+      // Moves to mate relative to the player
+      const movesToMate = Math.ceil((29000 - Math.abs(result.evaluation)) / 2);
+      const isWinning = displayScore > 0;
+      scoreDisplay = `M# ${isWinning ? '+' : '-'}${movesToMate}`;
   } else {
-      const scoreUnit = whiteRelativeScore / 100; 
+      const scoreUnit = displayScore / 100; 
       scoreDisplay = scoreUnit > 0 ? `+${scoreUnit.toFixed(2)}` : scoreUnit.toFixed(2);
   }
   
   const progressPercent = Math.min(100, (result.currentDepth / configDepth) * 100);
   
+  // Eval Bar Logic
+  // 100% = Good for Current Perspective (Green). 0% = Bad (Red).
+  // We clamp score to +/- 1000 cp (10 pawns).
   let evalPercent = 50;
   if (isMate) {
-      evalPercent = whiteRelativeScore > 0 ? 100 : 0;
+      evalPercent = displayScore > 0 ? 100 : 0;
   } else {
-      const capped = Math.max(-1000, Math.min(1000, whiteRelativeScore));
+      const capped = Math.max(-1000, Math.min(1000, displayScore));
+      // Map -1000..1000 to 0..100
       evalPercent = 50 + (capped / 20);
   }
 
@@ -119,8 +130,8 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result, turn, conf
 
       <div className="grid grid-cols-2 gap-2 text-sm mb-2">
         <div className="bg-slate-700/50 p-1.5 rounded">
-           <p className="text-[10px] text-slate-500 uppercase font-semibold">Evaluation (White)</p>
-           <p className={`font-mono text-lg leading-tight font-bold ${whiteRelativeScore > 0 ? 'text-green-400' : whiteRelativeScore < 0 ? 'text-red-400' : 'text-slate-200'}`}>
+           <p className="text-[10px] text-slate-500 uppercase font-semibold">Evaluation ({isFlipped ? 'Black' : 'White'})</p>
+           <p className={`font-mono text-lg leading-tight font-bold ${displayScore > 0 ? 'text-green-400' : displayScore < 0 ? 'text-red-400' : 'text-slate-200'}`}>
              {scoreDisplay}
            </p>
         </div>

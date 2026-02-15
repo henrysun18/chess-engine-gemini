@@ -12,6 +12,7 @@ interface BoardProps {
   validMoves: Move[];
   lastMove: Move | null;
   bestMove: Move | null;
+  isFlipped: boolean;
 }
 
 const PieceDisplay = ({ piece }: { piece: { color: PieceColor; type: PieceType } }) => {
@@ -22,12 +23,19 @@ const PieceDisplay = ({ piece }: { piece: { color: PieceColor; type: PieceType }
   );
 };
 
-export const Board: React.FC<BoardProps> = ({ board, onSquareClick, selectedSquare, validMoves, lastMove, bestMove }) => {
-  const renderSquare = (i: number) => {
+export const Board: React.FC<BoardProps> = ({ board, onSquareClick, selectedSquare, validMoves, lastMove, bestMove, isFlipped }) => {
+  const renderSquare = (i: number, visualIndex: number) => {
+    // i is the logical board index (0-63, 0=a8)
+    // visualIndex is the grid position (0=top-left)
+
     const r = getRow(i);
     const c = getCol(i);
     const isDark = (r + c) % 2 === 1;
     
+    // Visual grid coordinates for label placement
+    const visualR = Math.floor(visualIndex / 8);
+    const visualC = visualIndex % 8;
+
     const piece = board[i];
     const isSelected = selectedSquare === i;
     const isValidDest = validMoves.some(m => m.to === i);
@@ -51,8 +59,18 @@ export const Board: React.FC<BoardProps> = ({ board, onSquareClick, selectedSqua
         className={`w-full h-full flex items-center justify-center relative ${bgClass}`}
       >
         {/* Coordinate labels */}
-        {c === 0 && <span className={`absolute top-0.5 left-1 text-[10px] font-bold select-none ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>{8 - r}</span>}
-        {r === 7 && <span className={`absolute bottom-0 right-1 text-[10px] font-bold select-none ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>{String.fromCharCode(97 + c)}</span>}
+        {/* Ranks on left edge */}
+        {visualC === 0 && (
+            <span className={`absolute top-0.5 left-1 text-[10px] font-bold select-none ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
+                {8 - r}
+            </span>
+        )}
+        {/* Files on bottom edge */}
+        {visualR === 7 && (
+            <span className={`absolute bottom-0 right-1 text-[10px] font-bold select-none ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
+                {String.fromCharCode(97 + c)}
+            </span>
+        )}
 
         {/* Engine Best Move Indicator (Blue Ring) */}
         {(isBestMoveFrom || isBestMoveTo) && !isSelected && (
@@ -79,7 +97,11 @@ export const Board: React.FC<BoardProps> = ({ board, onSquareClick, selectedSqua
 
   return (
     <div className="aspect-square w-full grid grid-cols-8 grid-rows-8 border-4 border-slate-700 shadow-2xl rounded-sm overflow-hidden bg-slate-800 select-none">
-      {board.map((_, i) => renderSquare(i))}
+      {board.map((_, visualIndex) => {
+          // Map visual grid position to logical board index based on flip state
+          const boardIndex = isFlipped ? 63 - visualIndex : visualIndex;
+          return renderSquare(boardIndex, visualIndex);
+      })}
     </div>
   );
 };

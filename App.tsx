@@ -20,6 +20,7 @@ function App() {
   const [legalMoves, setLegalMoves] = useState<Move[]>([]);
   const [engineEnabled, setEngineEnabled] = useState(false);
   const [pendingPromotion, setPendingPromotion] = useState<{ move: Move; from: number; to: number } | null>(null);
+  const [isFlipped, setIsFlipped] = useState(false);
   
   // Engine State
   const [engineConfig, setEngineConfig] = useState<EngineConfig>({ 
@@ -270,6 +271,7 @@ function App() {
                 validMoves={legalMoves}
                 lastMove={gameState.history.length > 0 ? gameState.history[gameState.history.length - 1] : null}
                 bestMove={engineResult.bestMove}
+                isFlipped={isFlipped}
               />
           </div>
           <p className="text-xs text-slate-500 mt-2">Drag bottom-right to resize board</p>
@@ -300,6 +302,8 @@ function App() {
              engineEnabled={engineEnabled}
              setEngineEnabled={setEngineEnabled}
              gameState={gameState.isGameOver ? (gameState.winner ? `Winner: ${gameState.winner}` : 'Draw') : 'playing'}
+             isFlipped={isFlipped}
+             onFlipBoard={() => setIsFlipped(!isFlipped)}
            />
 
            {engineEnabled && (
@@ -308,6 +312,7 @@ function App() {
                 turn={gameState.turn} 
                 configDepth={engineConfig.depth} 
                 gameState={gameState} 
+                isFlipped={isFlipped}
              />
            )}
            
